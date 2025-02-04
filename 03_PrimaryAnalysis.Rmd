@@ -1,0 +1,119 @@
+---
+title: "Primary outcome"
+output: html_document
+date: "2024-05-09"
+---
+
+```{r setup, include=FALSE}
+pacman::p_load(brms,mice,tidyverse,here,emmeans,marginaleffects,kableExtra)
+harmony <- readRDS(here("Data","harmony.RDS"))
+imp <- readRDS(here("Data","imp.RDS"))
+```
+
+
+Set up the data for analysis
+```{r}
+#obtain all imputed datasets with each imputation attached below
+primdat <- complete(imp,action="long")
+#keep only the times we want, and move it to long format with a row for each time
+primdat_long <- primdat %>% dplyr::select(record_id,abstinent_w12,abstinent_w24,.imp) %>%
+  pivot_longer(cols=c(abstinent_w12,abstinent_w24),names_to = "time",values_to = "abstinent") %>%
+  mutate(time = ifelse(time=="abstinent_w12","week12","week24"))
+
+#factorise the variables for stan
+primdat <- merge(primdat,primdat_long,by=c(".imp","record_id")) %>%
+  mutate(redcap_data_access_group = factor(redcap_data_access_group,
+                                           levels=c("sydney_lhd","hunter_new_england","south_western_sydn",
+                                                    "western_sydney_lhd","st_vincents_lhn","south_east_sydney")),
+         treatment = factor(treatment),
+         record_id = factor(record_id),
+         time = factor(time),
+         atop_cannabis_used_baseline = factor(atop_cannabis_used_baseline)) %>%
+  dplyr::select(.imp,record_id,time,abstinent,redcap_data_access_group,treatment,
+                atop_cannabis_used_baseline) %>%
+  arrange(as.numeric(.imp))
+
+#a list of datasets for brm_multiple
+primdat <- split(x=primdat,f=primdat$.imp)
+saveRDS(primdat,here("Data","primdat.RDS"))
+```
+
+
+```{r}
+#run the primary hierarchical model - takes a while so the output gets saved
+fit_imp1 <- brm_multiple(abstinent ~ 0 + Intercept + treatment*time + atop_cannabis_used_baseline + (1|record_id) + (1|redcap_data_access_group), 
+                         chains=4,cores=4,iter=11000,warmup=3000,seed=564425021,
+                         family=bernoulli(),data=primdat,control = list(adapt_delta = 0.999,max_treedepth=15),
+                         prior = c(prior(normal(0,1000),class=b),
+                                   prior(student_t(3, 0, 3.75), lb=0,class=sd)))
+
+#check convergence of each imputation
+rhats <- fit_imp1$rhats
+#saveRDS(fit_imp1,here("Data","fit_imp1.RDS"))
+#fit_imp1 <- readRDS(here("Data","fit_imp1.RDS"))
+
+#get the effect estimates we want for the report
+#primpred <- predictions(fit_imp1,by = c("treatment", "time"))
+#mean difference
+primmd <- avg_comparisons(fit_imp1,variables=list(treatment="pairwise",time="all"),cross=TRUE,ndraws=5000)
+#rate ratio
+primrr <- avg_comparisons(fit_imp1,variables=list(treatment="pairwise",time="all"),cross=TRUE,
+                         comparison = "ratio",ndraws=5000)
+
+saveRDS(primmd,here("Output","primmd.RDS"))
+saveRDS(primrr,here("Output","primrr.RDS"))
+
+```
+
+
+```{r}
+#mostly fine plot, 1 point is an outlier on site but thats it
+pairs(fit_imp1)
+summary(fit_imp1)
+pp_check(fit_imp1)
+plot(fit_imp1)
+
+```
+
+```{r}
+primrr <- readRDS(here("Output","primrr.RDS"))
+primmd <- readRDS(here("Output","primmd.RDS"))
+
+primrr <- primrr %>% mutate(RR = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")"),
+                            time = ifelse(grepl(12, contrast_time),12,24)) %>%
+  filter(contrast_time != "mean(week12) / mean(week24)", contrast_time != "mean(week24) / mean(week12)") %>%
+  select(time,RR)
+primmd <- primmd %>% mutate(MD = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")"),
+                            time = ifelse(grepl(12, contrast_time),12,24)) %>%
+    filter(contrast_time != "mean(week12) - mean(week24)", contrast_time != "mean(week24) - mean(week12)") %>%
+  select(time,MD)
+
+prim_res <- merge(primrr,primmd,by="time")
+
+
+#fit_imp1 <- readRDS(here("Data","fit_imp1.RDS"))
+primh <- hypothesis(fit_imp1,c("treatmentVNP > 0","treatmentVNP + treatmentVNP:timeweek24  > 0"))[["hypothesis"]] %>%
+  mutate(time = ifelse(grepl("timeweek24", Hypothesis),24,12)) %>%
+  select(Evid.Ratio,Post.Prob,time)
+
+raw_ab <- harmony %>% 
+  filter(redcap_event_name %in% c("week_12_arm_1","week_24_arm_1")) %>% 
+  group_by(redcap_event_name,treatment) %>% 
+  summarise(prop_ab = paste0(sum(abstinent==1,na.rm=TRUE),"/",sum(!is.na(abstinent))," (",round(mean(abstinent==1,na.rm=TRUE)*100,0),"%)")) %>%
+  pivot_wider(id_cols="redcap_event_name",names_from="treatment",values_from="prop_ab") %>%
+  mutate(time = ifelse(redcap_event_name == "week_12_arm_1",12,24)) %>%
+  ungroup() %>%
+  select(-redcap_event_name)
+
+prim_tab <- merge(raw_ab,prim_res,by="time") %>% merge(primh,by="time")
+saveRDS(prim_tab,here("Output","prim_tab.RDS"))
+kable(prim_tab[,c(1,3,2,4,5,7,6)],
+      col.names=c("Time","VNP","NRT","Rate ratio (95% CrI)","Mean difference (95% CrI)","Probability of direction","Bayes Factor"),
+      digits=c(1,1,1,1,1,4,2)) %>%
+  add_header_above(c(" "=1,"Crude proportion n/N (%)"=2,"Model Results (VNP vs NRT)" = 4))
+```
+
+
+
+mixture prior https://mc-stan.org/docs/2_26/stan-users-guide/vectorizing-mixtures.html
+#interaction effects are coded in this https://pj.freefaculty.org/guides/crmda_workshops/sem/sem-bayes/sem-5-4-bayes_sem/sem-5-4-bayes_sem.pdf

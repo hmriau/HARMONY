@@ -1,0 +1,557 @@
+---
+title: "Sensitivity analyses"
+output: html_document
+date: "2024-06-02"
+---
+
+
+
+```{r setup, include=FALSE}
+pacman::p_load(brms,mice,tidyverse,here,emmeans,marginaleffects,kableExtra,rstan,cmdstanr,bayestestR,future,future.apply)
+harmony <- readRDS(here("Data","harmony.RDS"))
+imp <- readRDS(here("Data","imp.RDS"))
+'%!in%' <- function(x,y)!('%in%'(x,y))
+```
+
+# 19 participants who were cluster randomised
+remove then to show that the results are similar
+```{r}
+
+primdat <- readRDS(here("Data","primdat.RDS"))
+primdat_crct <- bind_rows(primdat) %>%
+  filter(record_id %!in% c("253-107","253-119","253-140","255-143","255-41","255-66",
+                           "256-17","256-39","256-51","256-6","256-68","256-77",
+                           "256-88","256-93","257-49","257-70","258-30","258-37","258-42"))
+primdat_crct <- split(x=primdat_crct,f=primdat_crct$.imp)
+
+
+#run the primary hierarchical model - takes a while so the output gets saved
+fit_crct <- brm_multiple(abstinent ~ 0 + Intercept + treatment*time + atop_cannabis_used_baseline + (1|record_id) + (1|redcap_data_access_group), 
+                         chains=4,cores=4,iter=10000,warmup=2000,seed=564425021,
+                         family=bernoulli(),data=primdat_crct,control = list(adapt_delta = 0.99,max_treedepth=15),
+                         prior = c(prior(normal(0,1000),class=b),
+                                   prior(student_t(3, 0, 3.75), lb=0,class=sd)))
+
+#check convergence of each imputation
+rhats <- fit_crct$rhats
+#saveRDS(fit_crct,here("Data","fit_crct.RDS"))
+#fit_crct <- readRDS(here("Data","fit_crct.RDS"))
+
+#get the effect estimates we want for the report
+#primpred <- predictions(fit_imp1,by = c("treatment", "time"))
+#mean difference
+crctmd <- avg_comparisons(fit_crct,variables=list(treatment="pairwise",time="all"),cross=TRUE,ndraws=5000)
+#rate ratio
+crctrr <- avg_comparisons(fit_crct,variables=list(treatment="pairwise",time="all"),cross=TRUE,
+                         comparison = "ratio",ndraws=5000)
+
+#saveRDS(crctmd,here("Output","crctmd.RDS"))
+#saveRDS(crctrr,here("Output","crctrr.RDS"))
+#crctrr <- readRDS(here("Output","crctrr.RDS"))
+#crctmd <- readRDS(here("Output","crctmd.RDS"))
+
+#tidy the output
+crctrr <- crctrr %>% mutate(RR = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")"),
+                            time = ifelse(grepl(12, contrast_time),12,24)) %>%
+  filter(contrast_time != "mean(week12) / mean(week24)", contrast_time != "mean(week24) / mean(week12)") %>%
+  select(time,RR)
+crctmd <- crctmd %>% mutate(MD = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")"),
+                            time = ifelse(grepl(12, contrast_time),12,24)) %>%
+    filter(contrast_time != "mean(week12) - mean(week24)", contrast_time != "mean(week24) - mean(week12)") %>%
+  select(time,MD)
+
+crct_res <- merge(crctrr,crctmd,by="time")
+
+#probability of direction and bayes factor
+#fit_crct <- readRDS(here("Data","fit_crct.RDS"))
+crcth <- hypothesis(fit_crct,c("treatmentVNP > 0","treatmentVNP + treatmentVNP:timeweek24  > 0"))[["hypothesis"]] %>%
+  mutate(time = ifelse(grepl("timeweek24", Hypothesis),24,12)) %>%
+  select(Evid.Ratio,Post.Prob,time)
+#raw values
+crct_ab <- harmony %>% 
+  filter(redcap_event_name %in% c("week_12_arm_1","week_24_arm_1")) %>% 
+  filter(record_id %!in% c("253-107","253-119","253-140","255-143","255-41","255-66",
+                           "256-17","256-39","256-51","256-6","256-68","256-77",
+                           "256-88","256-93","257-49","257-70","258-30","258-37","258-42")) %>%
+  group_by(redcap_event_name,treatment) %>% 
+  summarise(prop_ab = paste0(sum(abstinent==1,na.rm=TRUE),"/",sum(!is.na(abstinent))," (",round(mean(abstinent==1,na.rm=TRUE)*100,0),"%)")) %>%
+  pivot_wider(id_cols="redcap_event_name",names_from="treatment",values_from="prop_ab") %>%
+  mutate(time = ifelse(redcap_event_name == "week_12_arm_1",12,24)) %>%
+  ungroup() %>%
+  select(-redcap_event_name)
+#put the output together
+crct_tab <- merge(crct_ab,crct_res,by="time") %>% merge(crcth,by="time")
+saveRDS(crct_tab,here("Output","crct_tab.RDS"))
+kable(crct_tab[,c(1,3,2,4,5,7,6)],
+      col.names=c("Time","VNP","NRT","Rate ratio (95% CrI)","Mean difference (95% CrI)","Probability of direction","Bayes Factor"),
+      digits=c(1,1,1,1,1,4,2)) %>%
+  add_header_above(c(" "=1,"Crude proportion n/N (%)"=2,"Model Results (VNP vs NRT)" = 4))
+
+```
+
+
+# Complete case
+
+```{r}
+
+base_harmony <- harmony %>% filter(redcap_event_name == "screening_consent_arm_1") %>% 
+  dplyr::select(record_id,atop_cannabis_used) %>%
+  rename(atop_cannabis_used_baseline = atop_cannabis_used)
+
+ccdat <- harmony %>% filter(redcap_event_name %in% c("week_12_arm_1","week_24_arm_1"), !is.na(abstinent)) %>%
+  left_join(base_harmony,by="record_id") %>%
+#factorise the variables for stan
+  mutate(redcap_data_access_group = factor(redcap_data_access_group,
+                                           levels=c("sydney_lhd","hunter_new_england","south_western_sydn",
+                                                    "western_sydney_lhd","st_vincents_lhn","south_east_sydney")),
+         treatment = factor(treatment),
+         record_id = factor(record_id),
+         time = factor(ifelse(redcap_event_name=="week_12_arm_1",12,24)),
+         atop_cannabis_used_baseline = factor(atop_cannabis_used_baseline)) %>%
+  dplyr::select(record_id,time,abstinent,redcap_data_access_group,treatment,
+                atop_cannabis_used_baseline)
+
+prim_cc <- brm(abstinent ~ 0 + Intercept + treatment*time + atop_cannabis_used_baseline + (1|record_id) + (1|redcap_data_access_group), 
+                         chains=4,cores=4,iter=10000,warmup = 2000,seed=564425021,
+                         family=bernoulli(),data=ccdat,control = list(adapt_delta = 0.99,max_treedepth=15),
+                         prior = c(prior(normal(0,1000),class=b),
+                                   prior(student_t(3, 0, 3.75), lb=0,class=sd)))
+
+
+ccmd <- avg_comparisons(prim_cc,variables=list(treatment="pairwise",time="all"),cross=TRUE,ndraws=5000)
+#rate ratio
+ccrr <- avg_comparisons(prim_cc,variables=list(treatment="pairwise",time="all"),cross=TRUE,
+                         comparison = "ratio",ndraws=5000)
+
+ccrr <- ccrr %>% mutate(RR = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")"),
+                            time = ifelse(grepl(12, contrast_time),12,24)) %>%
+  filter(contrast_time != "mean(12) / mean(24)", contrast_time != "mean(24) / mean(12)") %>%
+  select(time,RR)
+ccmd <- ccmd %>% mutate(MD = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")"),
+                            time = ifelse(grepl(12, contrast_time),12,24)) %>%
+    filter(contrast_time != "mean(12) - mean(24)", contrast_time != "mean(24) - mean(12)") %>%
+  select(time,MD)
+
+cc_res <- merge(ccrr,ccmd,by="time")
+
+
+#fit_imp1 <- readRDS(here("Data","fit_imp1.RDS"))
+cch <- hypothesis(prim_cc,c("treatmentVNP > 0","treatmentVNP + treatmentVNP:time24  > 0"))[["hypothesis"]] %>%
+  mutate(time = ifelse(grepl("time24", Hypothesis),24,12)) %>%
+  select(Evid.Ratio,Post.Prob,time)
+
+raw_ab <- harmony %>% 
+  filter(redcap_event_name %in% c("week_12_arm_1","week_24_arm_1")) %>% 
+  group_by(redcap_event_name,treatment) %>% 
+  summarise(prop_ab = paste0(sum(abstinent==1,na.rm=TRUE),"/",sum(!is.na(abstinent))," (",round(mean(abstinent==1,na.rm=TRUE)*100,0),"%)")) %>%
+  pivot_wider(id_cols="redcap_event_name",names_from="treatment",values_from="prop_ab") %>%
+  mutate(time = ifelse(redcap_event_name == "week_12_arm_1",12,24)) %>%
+  ungroup() %>%
+  select(-redcap_event_name)
+
+cc_tab <- merge(raw_ab,cc_res,by="time") %>% merge(cch,by="time") %>%
+  filter(time == "12")
+saveRDS(cc_tab,here("Output","cc_tab.RDS"))
+
+kable(cc_tab[,c(1,3,2,4,5,7,6)],
+      col.names=c("Time","VNP","NRT","Rate ratio (95% CrI)","Mean difference (95% CrI)","Probability of direction","Bayes Factor"),
+      digits=c(1,1,1,1,1,4,2)) %>%
+  add_header_above(c(" "=1,"Crude proportion n/N (%)"=2,"Model Results (VNP vs NRT)" = 4))
+
+```
+
+
+# Complier average causal effect
+
+```{r}
+imp1 <- imp[[1]] %>% dplyr::select(record_id,treatment)
+cacedat <- harmony %>%
+  mutate(adherence = case_when(treatment == "NRT" ~ 0,
+                               vape_any == "Yes, currently using" & treatment == "VNP" ~ 1,
+                               vape_any != "Yes, currently using" & !is.na(vape_any) & treatment == "VNP" ~ 0)) %>%
+  dplyr::select(record_id,redcap_event_name,treatment,oralnrt_any,vape_any,adherence) %>%
+  filter(!is.na(adherence),redcap_event_name=="week_12_arm_1")
+
+imp2 <- full_join(cacedat,imp1) %>% mutate(adherence = case_when(treatment == "NRT" ~ 0,
+                                                                 treatment == "VNP" & is.na(adherence) ~ 0,
+                                                                 .default=adherence))
+lm(adherence ~ treatment,data=imp2) %>% summary()
+cacelm <- lm(adherence ~ treatment,data=cacedat)
+#VNP = 0.856, NRT = 0
+#77 out of 259 reported using it (0.297)
+#or 77 / 90 if only including non-missing
+#many missings
+
+primdat <- readRDS(here("Data","primdat.RDS"))
+cace <- bind_rows(primdat) %>%
+  mutate(cace_trt = case_when(treatment == "VNP" ~ 0.297,
+                           treatment == "NRT" ~ 0))
+cace <- split(x=cace,f=cace$.imp)
+cace1 <- cace[[1]]
+
+#run the CACE hierarchical model
+fit_cace <- brm(abstinent ~ 0 + Intercept + cace_trt*time + atop_cannabis_used_baseline + (1|record_id) + (1|redcap_data_access_group), 
+                         chains=4,cores=4,iter=12000,warmup=4000,seed=564425021,
+                         family=bernoulli(),data=cace1,control = list(adapt_delta = 0.99,max_treedepth=15),
+                         prior = c(prior(normal(0,1000),class=b),
+                                   prior(student_t(3, 0, 3.75), lb=0,class=sd)))
+summary(fit_cace)
+#mean difference
+cacemd <- avg_comparisons(fit_cace,variables=list(cace_trt=c(0,1),time="all"),cross=TRUE,ndraws=5000)
+#rate ratio
+cacerr <- avg_comparisons(fit_cace,variables=list(cace_trt=c(0,1),time="all"),cross=TRUE,
+                         comparison = "ratio",ndraws=5000)
+cacerr <- cacerr %>% mutate(RR = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")"),
+                            time = ifelse(grepl(12, contrast_time),12,24)) %>%
+  filter(contrast_time != "mean(week12) / mean(week24)", contrast_time != "mean(week24) / mean(week12)") %>%
+  dplyr::select(time,RR)
+cacemd <- cacemd %>% mutate(MD = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")"),
+                            time = ifelse(grepl(12, contrast_time),12,24)) %>%
+    filter(contrast_time != "mean(week12) - mean(week24)", contrast_time != "mean(week24) - mean(week12)") %>%
+  dplyr::select(time,MD)
+
+cace_res <- merge(cacerr,cacemd,by="time")
+
+
+#fit_imp1 <- readRDS(here("Data","fit_imp1.RDS"))
+caceh <- hypothesis(fit_cace,"cace_trt > 0")[["hypothesis"]] %>%
+  mutate(time = ifelse(grepl("time24", Hypothesis),24,12)) %>%
+  dplyr::select(Evid.Ratio,Post.Prob,time)
+
+raw_ab <- harmony %>% 
+  filter(redcap_event_name %in% c("week_12_arm_1","week_24_arm_1")) %>% 
+  group_by(redcap_event_name,treatment) %>% 
+  summarise(prop_ab = paste0(sum(abstinent==1,na.rm=TRUE),"/",sum(!is.na(abstinent))," (",round(mean(abstinent==1,na.rm=TRUE)*100,0),"%)")) %>%
+  pivot_wider(id_cols="redcap_event_name",names_from="treatment",values_from="prop_ab") %>%
+  mutate(time = ifelse(redcap_event_name == "week_12_arm_1",12,24)) %>%
+  ungroup() %>%
+  dplyr::select(-redcap_event_name)
+
+cace_tab <- merge(raw_ab,cace_res,by="time") %>% merge(caceh,by="time") %>%
+  filter(time == "12")
+saveRDS(cace_tab,here("Output","cace_tab.RDS"))
+
+```
+
+
+# Weighted power prior
+
+
+```{r}
+primdat <- readRDS(here("Data","primdat.RDS"))
+primdat1 <- primdat[[1]]
+primdat1_t1 <- primdat1 %>% filter(time == "week12")
+pp_codet1 <- "
+// generated with brms 2.21.0
+functions {
+}
+data {
+  int<lower=1> N;  // total number of observations
+  array[N] int Y;  // response variable
+  int<lower=1> K;  // number of population-level effects
+  matrix[N, K] X;  // population-level design matrix
+  // data for group-level effects of ID 1
+  int<lower=1> N_1;  // number of grouping levels
+  int<lower=1> M_1;  // number of coefficients per level
+  array[N] int<lower=1> J_1;  // grouping indicator per observation
+  // group-level predictor values
+  vector[N] Z_1_1;
+  int prior_only;  // should the likelihood be ignored?
+  real ppf; // power prior factor
+
+}
+transformed data {
+}
+parameters {
+  vector[K] b;  // regression coefficients
+  vector<lower=0>[M_1] sd_1;  // group-level standard deviations
+  array[M_1] vector[N_1] z_1;  // standardized group-level effects
+}
+transformed parameters {
+  vector[N_1] r_1_1;  // actual group-level effects
+  real lprior = 0;  // prior contributions to the log posterior
+  r_1_1 = (sd_1[1] * (z_1[1]));
+  //lprior += normal_lpdf(b[1] | 0, 1000);
+  //lprior += normal_lpdf(b[2] | 0, 1000);
+  lprior += normal_lpdf(b[3] | 0, 1000);
+  lprior += student_t_lpdf(sd_1 | 3, 0, 3.75)
+    - 1 * student_t_lccdf(0 | 3, 0, 3.75);
+}
+model {
+  // likelihood including constants
+  if (!prior_only) {
+    // initialize linear predictor term
+    vector[N] mu = rep_vector(0.0, N);
+    for (n in 1:N) {
+      // add more terms to the linear predictor
+      mu[n] += r_1_1[J_1[n]] * Z_1_1[n];
+    }
+    target += bernoulli_logit_glm_lpmf(Y | X, mu, b);
+      //power prior
+    target += ppf * binomial_logit_lpmf(165 | 471, b[1] + b[2]);
+    target += ppf * binomial_logit_lpmf(124 | 463, b[1]);
+
+  }
+  // priors including constants
+  target += lprior;
+  target += std_normal_lpdf(z_1[1]);
+}
+generated quantities {
+}"
+
+
+# feed the Stan model back into brms
+ppbrmfit <- brm(abstinent ~ 0 + Intercept + treatment + atop_cannabis_used_baseline + (1|redcap_data_access_group),
+                data=primdat1_t1 , family = bernoulli(link="logit"),
+                chains=4,cores=4,iter=10000,seed=564425021,
+                prior = c(prior(normal(0,1000),class=b,coef="Intercept"),
+                          prior(normal(0,1000),class=b,coef="atop_cannabis_used_baseline1"),
+                          prior(normal(0,1000),class=b,coef="treatmentVNP"),
+                          prior(student_t(3, 0, 3.75), lb=0,class=sd)),
+                            empty=TRUE)
+
+#function to run stan model and put it into brms output
+runbrm <- function(wgt=wgt,primdat=primdat){
+  x <- primdat
+  # fit a model manually via rstan
+  pp_data <- brms::make_standata(abstinent ~ 0 + Intercept + treatment + atop_cannabis_used_baseline + (1|redcap_data_access_group),
+                                 data=x , family = bernoulli(link="logit"),
+                                 chains=4,cores=4,iter=10000)
+  
+  #put the power prior weighting into the dataset
+  pp_dataf <- pp_data
+  pp_dataf$ppf <- wgt
+  
+  #run the stan model
+  ppfitf <- rstan::stan(model_code = pp_codet1, data = pp_dataf,chains=4,cores=1,iter=10000,warmup=2000,control=list(adapt_delta=0.95))
+  
+  #Feed the stan model fit back into brms
+  ppbrmfitf <- ppbrmfit
+  ppbrmfitf$fit <- ppfitf
+  ppbrmfitf <- rename_pars(ppbrmfitf)
+  summary(ppbrmfitf)
+  
+  return(ppbrmfitf)
+}
+
+plan(multisession,workers=20)
+#function for wgt = 0.25
+ppfit0.25 <- future_lapply(primdat, FUN = runbrm, wgt=0.25, future.seed = 30L)
+#check fits
+for(i in 1:20){
+  print(paste0("List ",i,": ",sum(summary(ppfit0.25[[i]])$fixed$Rhat > 1.05 | summary(ppfit0.25[[i]])$fixed$Bulk_ESS < 3200 | summary(ppfit0.25[[i]])$fixed$Tail_ESS < 3200),
+               " convergence issues detected."))
+}
+ppbrmfit_0.25 <- combine_models(ppfit0.25[[1]],ppfit0.25[[2]],ppfit0.25[[3]],ppfit0.25[[4]],ppfit0.25[[5]],
+                        ppfit0.25[[6]],ppfit0.25[[7]],ppfit0.25[[8]],ppfit0.25[[9]],ppfit0.25[[10]],
+                        ppfit0.25[[11]],ppfit0.25[[12]],ppfit0.25[[13]],ppfit0.25[[14]],ppfit0.25[[15]],
+                        ppfit0.25[[16]],ppfit0.25[[17]],ppfit0.25[[18]],ppfit0.25[[19]],ppfit0.25[[20]])
+saveRDS(ppbrmfit_0.25,here("Output","ppbrmfit_025.RDS"))
+#wgt = 0.5
+ppfit0.5 <- future_lapply(primdat, FUN = runbrm, wgt=0.5, future.seed = 30L)
+#check fits
+for(i in 1:20){
+  print(paste0("List ",i,": ",sum(summary(ppfit0.5[[i]])$fixed$Rhat > 1.05 | summary(ppfit0.5[[i]])$fixed$Bulk_ESS < 3200 | summary(ppfit0.5[[i]])$fixed$Tail_ESS < 3200),
+               " convergence issues detected."))
+}
+ppbrmfit_0.5 <- combine_models(ppfit0.5[[1]],ppfit0.5[[2]],ppfit0.5[[3]],ppfit0.5[[4]],ppfit0.5[[5]],
+                        ppfit0.5[[6]],ppfit0.5[[7]],ppfit0.5[[8]],ppfit0.5[[9]],ppfit0.5[[10]],
+                        ppfit0.5[[11]],ppfit0.5[[12]],ppfit0.5[[13]],ppfit0.5[[14]],ppfit0.5[[15]],
+                        ppfit0.5[[16]],ppfit0.5[[17]],ppfit0.5[[18]],ppfit0.5[[19]],ppfit0.5[[20]])
+saveRDS(ppbrmfit_0.5,here("Output","ppbrmfit_05.RDS"))
+#wgt = 1
+ppfit1 <- future_lapply(primdat, FUN = runbrm, wgt=1, future.seed = 30L)
+#check fits
+for(i in 1:20){
+  print(paste0("List ",i,": ",sum(summary(ppfit1[[i]])$fixed$Rhat > 1.05 | summary(ppfit1[[i]])$fixed$Bulk_ESS < 3200 | summary(ppfit1[[i]])$fixed$Tail_ESS < 3200),
+               " convergence issues detected."))
+}
+ppbrmfit_1 <- combine_models(ppfit1[[1]],ppfit1[[2]],ppfit1[[3]],ppfit1[[4]],ppfit1[[5]],
+                        ppfit1[[6]],ppfit1[[7]],ppfit1[[8]],ppfit1[[9]],ppfit1[[10]],
+                        ppfit1[[11]],ppfit1[[12]],ppfit1[[13]],ppfit1[[14]],ppfit1[[15]],
+                        ppfit1[[16]],ppfit1[[17]],ppfit1[[18]],ppfit1[[19]],ppfit1[[20]])
+saveRDS(ppbrmfit_1,here("Output","ppbrmfit_1.RDS"))
+
+ppbrmfit_1 <- readRDS(here("Output","ppbrmfit_1.RDS"))
+ppbrmfit_0.5 <- readRDS(here("Output","ppbrmfit_05.RDS"))
+ppbrmfit_0.25 <- readRDS(here("Output","ppbrmfit_025.RDS"))
+
+#mean difference
+md0.25 <- avg_comparisons(ppbrmfit_0.25,variables=list(treatment="pairwise"),cross=TRUE,ndraws=5000)
+#rate ratio
+rr0.25 <- avg_comparisons(ppbrmfit_0.25,variables=list(treatment="pairwise"),cross=TRUE,
+                         comparison = "ratio",ndraws=5000)
+
+#mean difference
+md0.5 <- avg_comparisons(ppbrmfit_0.5,variables=list(treatment="pairwise"),cross=TRUE,ndraws=5000)
+#rate ratio
+rr0.5 <- avg_comparisons(ppbrmfit_0.5,variables=list(treatment="pairwise"),cross=TRUE,
+                         comparison = "ratio",ndraws=5000)
+
+#mean difference
+md1 <- avg_comparisons(ppbrmfit_1,variables=list(treatment="pairwise"),cross=TRUE,ndraws=5000)
+#rate ratio
+rr1 <- avg_comparisons(ppbrmfit_1,variables=list(treatment="pairwise"),cross=TRUE,
+                         comparison = "ratio",ndraws=5000)
+
+#bayes factor and probability of direction
+#NOTE: I dont think this will work correctly for a 2 sided hypothesis. That uses the prior which is (incorrectly) specified as N(0,1) instead of the weighted power prior
+h0.25 <- hypothesis(ppbrmfit_0.25,"treatmentVNP > 0")[["hypothesis"]] %>%
+  select(Evid.Ratio,Post.Prob)
+
+h0.5 <- hypothesis(ppbrmfit_0.5,"treatmentVNP > 0")[["hypothesis"]] %>%
+  select(Evid.Ratio,Post.Prob)
+
+h1 <- hypothesis(ppbrmfit_1,"treatmentVNP > 0")[["hypothesis"]] %>%
+  select(Evid.Ratio,Post.Prob)
+
+#MAKING CLEAN FOR THE TABLE
+rr0.25 <- rr0.25 %>% mutate(RR = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")")) %>%
+  select(RR)
+md0.25 <- md0.25 %>% mutate(MD = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")")) %>%
+  select(MD)
+res_0.25 <- merge(rr0.25,md0.25)
+rr0.5 <- rr0.5 %>% mutate(RR = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")")) %>%
+  select(RR)
+md0.5 <- md0.5 %>% mutate(MD = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")")) %>%
+  select(MD)
+res_0.5 <- merge(rr0.5,md0.5)
+rr1 <- rr1 %>% mutate(RR = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")")) %>%
+  select(RR)
+md1 <- md1 %>% mutate(MD = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")")) %>%
+  select(MD)
+res_1 <- merge(rr1,md1)
+
+#raw for all
+raw_ab <- harmony %>% 
+  filter(redcap_event_name %in% c("week_12_arm_1")) %>% 
+  group_by(treatment) %>% 
+  summarise(prop_ab = paste0(sum(abstinent==1,na.rm=TRUE),"/",sum(!is.na(abstinent))," (",round(mean(abstinent==1,na.rm=TRUE)*100,0),"%)")) %>%
+  pivot_wider(names_from="treatment",values_from="prop_ab")
+
+#combine
+pp_tab0.25 <- merge(raw_ab,res_0.25) %>% merge(h0.25) %>% mutate(wgt="0.25")
+pp_tab0.5 <- merge(raw_ab,res_0.5) %>% merge(h0.5) %>% mutate(wgt="0.5")
+pp_tab1 <- merge(raw_ab,res_1) %>% merge(h1) %>% mutate(wgt="1")
+
+pp_tab <- rbind(pp_tab0.25,pp_tab0.5,pp_tab1)
+saveRDS(pp_tab,here("Output","pp_tab.RDS"))
+```
+
+Checking the prior information - gives accurate result when inverse logit the output.
+Need to determine if the prior for control should include only those who were abstinent at baseline. Currently only defines the intercept (b[1]) so its also kind of giving a prior for non-cannabis users?
+```{r}
+
+pp_code__prior <- "
+data {
+  real ppf; // power prior factor
+}
+parameters {
+  vector[2] b;  // population-level effects
+}
+transformed parameters {
+  real lprior = 0;  // prior contributions to the log posterior
+}
+model {
+  // likelihood including constants
+    target += ppf * binomial_logit_lpmf(164 | 488, b[1] + b[2]);
+    target += ppf * binomial_logit_lpmf(122 | 496, b[1] );
+  // priors including constants
+  target += lprior;
+}
+"
+prior_pp <- rstan::stan(model_code = pp_code__prior, data = list(ppf=1),chains=4,cores=1,iter=10000,warmup=2000,control=list(adapt_delta=0.95))
+```
+
+
+# MNAR
+
+Missing not abstinent assumption
+```{r}
+notab_mnar_dat <- readRDS(here("Data","notab_mnar_dat.RDS"))
+
+#run the primary hierarchical model - takes a while so the output gets saved
+notab_fit <- brm(abstinent ~ 0 + Intercept + treatment*time + atop_cannabis_used_baseline + (1|record_id) + (1|redcap_data_access_group), 
+                         chains=4,cores=4,iter=10000,warmup=2000,seed=564425021,
+                         family=bernoulli(),data=notab_mnar_dat,control = list(adapt_delta = 0.99,max_treedepth=10),
+                         prior = c(prior(normal(0,1000),class=b),
+                                   prior(student_t(3, 0, 3.75), lb=0,class=sd)))
+saveRDS(notab_fit,here("Data","notab_fit.RDS"))
+
+#get the effect estimates we want for the report
+#mean difference
+notabmd <- avg_comparisons(notab_fit,variables=list(treatment="pairwise",time="all"),cross=TRUE,ndraws=5000)
+#rate ratio
+notabrr <- avg_comparisons(notab_fit,variables=list(treatment="pairwise",time="all"),cross=TRUE,
+                         comparison = "ratio",ndraws=5000)
+
+notabrr <- notabrr %>% mutate(RR = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")"),
+                            time = ifelse(grepl(12, contrast_time),12,24)) %>%
+  filter(contrast_time != "mean(week12) / mean(week24)", contrast_time != "mean(week24) / mean(week12)") %>%
+  select(time,RR)
+notabmd <- notabmd %>% mutate(MD = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")"),
+                            time = ifelse(grepl(12, contrast_time),12,24)) %>%
+    filter(contrast_time != "mean(week12) - mean(week24)", contrast_time != "mean(week24) - mean(week12)") %>%
+  select(time,MD)
+
+notab_res <- merge(notabrr,notabmd,by="time")
+
+notabh <- hypothesis(notab_fit,c("treatmentVNP > 0","treatmentVNP + treatmentVNP:timeweek24  > 0"))[["hypothesis"]] %>%
+  mutate(time = ifelse(grepl("timeweek24", Hypothesis),24,12)) %>%
+  select(Evid.Ratio,Post.Prob,time)
+
+raw_notab <- notab_mnar_dat %>% 
+  group_by(time,treatment) %>% 
+  summarise(prop_ab = paste0(sum(abstinent==1,na.rm=TRUE),"/",sum(!is.na(abstinent))," (",round(mean(abstinent==1,na.rm=TRUE)*100,0),"%)")) %>%
+  pivot_wider(id_cols="time",names_from="treatment",values_from="prop_ab") %>%
+  mutate(time = ifelse(time == "week12",12,24)) %>%
+  ungroup()
+
+notab_tab <- merge(raw_notab,notab_res,by="time") %>% merge(notabh,by="time")
+saveRDS(notab_tab,here("Output","notab_tab.RDS"))
+```
+
+Missing abstinent assumption
+```{r}
+ab_mnar_dat <- readRDS(here("Data","ab_mnar_dat.RDS"))
+
+#run the primary hierarchical model - takes a while so the output gets saved
+ab_fit <- brm(abstinent ~ 0 + Intercept + treatment*time + atop_cannabis_used_baseline + (1|record_id) + (1|redcap_data_access_group), 
+                         chains=4,cores=4,iter=10000,warmup=2000,seed=564425021,
+                         family=bernoulli(),data=ab_mnar_dat,control = list(adapt_delta = 0.99,max_treedepth=10),
+                         prior = c(prior(normal(0,1000),class=b),
+                                   prior(student_t(3, 0, 3.75), lb=0,class=sd)))
+saveRDS(ab_fit,here("Data","ab_fit.RDS"))
+
+#get the effect estimates we want for the report
+#mean difference
+abmd <- avg_comparisons(ab_fit,variables=list(treatment="pairwise",time="all"),cross=TRUE,ndraws=5000)
+#rate ratio
+abrr <- avg_comparisons(ab_fit,variables=list(treatment="pairwise",time="all"),cross=TRUE,
+                         comparison = "ratio",ndraws=5000)
+
+abrr <- abrr %>% mutate(RR = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")"),
+                            time = ifelse(grepl(12, contrast_time),12,24)) %>%
+  filter(contrast_time != "mean(week12) / mean(week24)", contrast_time != "mean(week24) / mean(week12)") %>%
+  select(time,RR)
+abmd <- abmd %>% mutate(MD = paste0(sprintf("%.2f",round(estimate,2))," (", round(conf.low,2),", ",round(conf.high,2),")"),
+                            time = ifelse(grepl(12, contrast_time),12,24)) %>%
+    filter(contrast_time != "mean(week12) - mean(week24)", contrast_time != "mean(week24) - mean(week12)") %>%
+  select(time,MD)
+
+ab_res <- merge(abrr,abmd,by="time")
+
+abh <- hypothesis(ab_fit,c("treatmentVNP > 0","treatmentVNP + treatmentVNP:timeweek24  > 0"))[["hypothesis"]] %>%
+  mutate(time = ifelse(grepl("timeweek24", Hypothesis),24,12)) %>%
+  select(Evid.Ratio,Post.Prob,time)
+
+raw_ab <- ab_mnar_dat %>% 
+  group_by(time,treatment) %>% 
+  summarise(prop_ab = paste0(sum(abstinent==1,na.rm=TRUE),"/",sum(!is.na(abstinent))," (",round(mean(abstinent==1,na.rm=TRUE)*100,0),"%)")) %>%
+  pivot_wider(id_cols="time",names_from="treatment",values_from="prop_ab") %>%
+  mutate(time = ifelse(time == "week12",12,24)) %>%
+  ungroup()
+
+ab_tab <- merge(raw_ab,ab_res,by="time") %>% merge(abh,by="time")
+saveRDS(ab_tab,here("Output","ab_tab.RDS"))
+```

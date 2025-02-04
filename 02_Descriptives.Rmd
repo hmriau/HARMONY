@@ -1,0 +1,309 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-05-06"
+---
+
+```{r setup, include=FALSE}
+pacman::p_load(here,tidyverse,gtsummary)
+harmony <- readRDS(here("Data","harmony.RDS"))
+
+```
+
+```{r}
+#Demographics
+#age currently missing
+table1 <- harmony %>% filter(redcap_event_name == "screening_consent_arm_1") %>%
+  tbl_summary(by="treatment",missing="no",
+              type = list(dependents ~ "continuous"),
+              statistic = c(all_continuous() ~ "{mean} ({sd})"),
+              include = c("gender","FN","age","datagrp","atop_cannabis_used","household_members",
+                          "dependents","education","incomesource_paid",
+                          "incomesource_benefit","incomesource_family","incomesource_savings","incomesource_other",
+                          "phq_category"),
+              label = list(gender ~ "Gender",
+                           FN ~ "Aboriginal or Torres Strait origin",
+                           age ~ "Age (years)",
+                           atop_cannabis_used ~ "Cannabis use",
+                           household_members ~ "Number of household members",
+                           datagrp = "Site",
+                           dependents ~ "Number of dependents",
+                           education ~ "Highest level of education",
+                           incomesource_paid ~ "Income: Paid work",
+                           incomesource_benefit ~ "Income: Government benefit or pension",
+                           incomesource_family ~ "Income: Family members",
+                           incomesource_savings ~ "Income: Personal savings",
+                           incomesource_other ~ "Income: Other",
+                           phq_category ~ "PHQ-4 category")) %>%
+  add_overall(last = TRUE) %>%
+  modify_table_body(filter, !(grepl( "incomesource", variable, fixed = TRUE) & 
+                                label == "No income from this source")) 
+saveRDS(table1, here("Output","Table1.RDS"))
+```
+
+
+Need to clean oat dose
+```{r}
+#Current OAT treatment
+harmony %>% filter(redcap_event_name %in% c("screening_consent_arm_1","week_24_arm_1")) %>%
+  tbl_strata(strata=redcap_event_name, ~.x %>%
+  tbl_summary(by = "treatment",missing = "no",
+              statistic = c(all_continuous() ~ "{mean} ({sd})"),
+              include = c("oat_meds","oat_meds_bupe","oat_route","oat_years"),
+              label = list(oat_meds ~ "Current OAT medication",
+                           oat_meds_bupe ~ "Buprenorphine brand",
+                           oat_route ~ "Route of administration",
+                           oat_years ~ "Length of current treatment episode (yrs)")) %>%
+    modify_header(all_stat_cols() ~ "**{level}**"))
+```
+
+
+smoking and quitting history
+```{r}
+
+harmony %>% filter(redcap_event_name == "screening_consent_arm_1") %>%
+  tbl_summary(by = "treatment", missing = "no",
+              include = c("hsi_category","tob_cigprerolled","tob_rollyourown","hsi2_day",
+                          "tob_chopchop","tob_other","quitlength","quitattempt_howlongago",
+                          "methods_ownwillpower","methods_briefadvice","methods_counselling",
+                          "methods_gum","methods_lozenges","methods_patches",
+                          "methods_mouthspray","methods_inhalator","methods_strips",
+                          "methods_champix","methods_zyban","methods_quitline",
+                          "methods_smartphone","methods_websites","methods_clinic",
+                          "methods_resources","methods_supportgroup","methods_ecig",
+                          "methods_other"),
+              label = list(hsi_category ~ "Heaviness of smoking index",
+                           tob_cigprerolled ~ "Cigarettes (pre-rolled)",
+                           tob_rollyourown ~ "Roll own cigarettes from commercial tobacco",
+                           tob_chopchop ~ "Roll own cigarettes from 'chop-chop' or other cheap sources",
+                           tob_other ~ "Other",
+                           hsi2_day ~ "Cigarettes smoked per day",
+                           quitlength ~ "Longest time able to stop smoking in past year",
+                           quitattempt_howlongago ~ "Last quit attempt in past year",
+                           methods_ownwillpower ~ "Own willpower, no help",
+                           methods_briefadvice ~ "Brief advice from health provider",
+                           methods_counselling ~ "Intensive counselling from a health provider",
+                           methods_gum ~ "Nicotine replace product: gum",
+                           methods_lozenges ~ "Nicotine replace product: lozenges",
+                           methods_patches ~ "Nicotine replace product: patches",
+                           methods_mouthspray ~ "Nicotine replace product: mouth spray",
+                           methods_inhalator ~ "Nicotine replace product: inhalator",
+                           methods_strips ~ "Nicotine replace product: strips",
+                           methods_champix ~ "Nicotine replace product: Champix",
+                           methods_zyban ~ "Nicotine replace product: Zyban",
+                           methods_quitline ~ "Telephone quitline",
+                           methods_smartphone ~ "Smart phone apps",
+                           methods_websites ~ "Websites",
+                           methods_clinic ~ "Smoking cessation clinic",
+                           methods_resources ~ "Educational resources",
+                           methods_supportgroup ~ "Quit smoking support group",
+                           methods_ecig ~ "E-cigarettes/vaping",
+                           methods_other ~ "Other"),
+              statistic = list(hsi2_day ~ "{mean} ({sd})"))
+```
+
+
+
+```{r}
+harmony %>% 
+  filter(redcap_event_name %in% c("screening_consent_arm_1","week_12_arm_1","week_24_arm_1")) %>%
+  tbl_strata(strata=redcap_event_name, ~.x %>%
+    tbl_summary(by = "treatment", missing = "no",
+            include = c("quitintention","motivation_current","motivation_nonsmoker",
+                        "quitdifficulty_current","quitdifficulty_nonsmoker",
+                        "selfefficacy_current","selfefficacy_nonsmoker",
+                        "nrtuseful"),
+            label = c(quitintention ~ "Current intention regarding quitting smoking",
+                      motivation_current ~ "How motivated to quit smoking",
+                      motivation_nonsmoker ~ "How motivated to remain quit from smoking",
+                      quitdifficulty_current ~ "How hard to quit smoking permanently",
+                      quitdifficulty_nonsmoker ~ "How hard to continue to stay quit",
+                      selfefficacy_current ~ "If decide to quit smoking, confidence to succeed in quitting smoking",
+                      selfefficacy_nonsmoker ~ "Confidence to succeed in quitting smoking",
+                      nrtuseful ~ "Nicotine product useful to quit smoking permanently")) %>%
+  modify_header(all_stat_cols() ~ "**{level}**"))
+
+```
+
+
+```{r}
+harmony %>% 
+  filter(redcap_event_name %in% c("screening_consent_arm_1","week_12_arm_1")) %>%
+  tbl_strata(strata=redcap_event_name, ~.x %>%
+    tbl_summary(by = "treatment", missing = "no",
+            include = c("tobaccospend"),
+            statistic = c(all_continuous() ~ "{mean} ({sd})"),
+            label = list(tobaccospend ~ "Amount spent on tobacco each week ($AUD)")) %>%
+  modify_header(all_stat_cols() ~ "**{level}**"))
+
+```
+
+
+add in an option for why vape_never - never given one / dont have one
+```{r}
+harmony %>% 
+  filter(redcap_event_name %in% c("week_12_arm_1","week_24_arm_1")) %>%
+  tbl_strata(strata=redcap_event_name, ~.x %>%
+    tbl_summary(by = "treatment", missing = "no",
+            include = c("vape_any","vape_freq","vape_lt_2","vape_duration","vape_freq_prev",
+                        "vape_start","vape_add","vape_add_yes___0","vape_add_yes___1",
+                        "vape_redcravings","vape_easy","vape_enjoyable","vape_safe",
+                        "vape_sideeff","vape_never"),
+            statistic = c(all_continuous() ~ "{mean} ({sd})"),
+            label = list(vape_any ~ "In last 12 weeks, used nicotine containing e-cigarettes to help quit or cut down on smoking",
+                         vape_freq ~ "How often do you currently use e-cigarettes",
+                         vape_lt_2 ~ "Do you plan to continue using e-cigarettes in the long term",
+                         vape_duration ~ "How long did you use e-cigarettes before stopping using them",
+                         vape_freq_prev ~ "How often did you use e-cigarettes when you were using it",
+                         vape_start ~ "When did you start vaping",
+                         vape_add ~ "Did you add anything to the nicotine e-liquid",
+                         vape_add_yes___0 ~ "Added flavouring",
+                         vape_add_yes___1 ~ "Added a drug",
+                         vape_redcravings ~ "Effective in reducing cravings",
+                         vape_easy ~ "Easy to use",
+                         vape_enjoyable ~ "Enjoyable to use",
+                         vape_safe ~ "Safe to use",
+                         vape_sideeff ~ "Concerned about side effects",
+                         vape_never ~ "What is the main reason you have not used e-cigarettes")) %>%
+  modify_header(all_stat_cols() ~ "**{level}**"))
+```
+
+ATOP - will hide any outcomes with < 5 responses
+one cigarette value is wrong
+```{r,echo=FALSE}
+harmony %>%
+  tbl_strata(strata=redcap_event_name, ~.x %>%
+    tbl_summary(by = "treatment", missing = "no",
+            include = c("atop_alc_used","atop_alc_28day_total","atop_alc_qty_clean_std",
+                        "atop_cannabis_used","atop_cann_28day_total","atop_cann_qty_clean_gram",
+                        "atop_amph_used","atop_amph_28day_total","atop_amph_qty_clean_mg",
+                        "atop_benzo_used","atop_benzo_28day_total","atop_benzo_clean_mg",
+                        "atop_heroin_used","atop_heroin_28day_total","atop_heroin_clean_gram",
+                        "atop_opioid_used","atop_opioid_28day_total","atop_opioid_clean_mg",
+                        "atop_cocaine_used","atop_cocaine_28day_total","atop_cocaine_clean_gram",
+                        "atop_tobacco_used","atop_tobacco_28day_total","atop_tobacco_clean_cigs",
+                        "atop_ecig_used","atop_ecig_28day_total",
+                        "atop_other_used",
+                        #"atop_psilocybin_mushrooms_28day_total","atop_psilocybin_mushrooms_clean_grams",
+                        #"atop_dmt_28day_total","atop_dmt_clean_mg",
+                        #"atop_ghb_28day_total","atop_ghb__clean_ml",
+                        #"atop_thc_oil_28day_total","atop_thc_oil_clean_ml",
+                        "atop_inject","atop_inject_28day_total","atop_inject_used_equip"),
+            type = list(atop_amph_qty_clean_mg ~ "continuous",
+                        atop_opioid_28day_total ~ "continuous",
+                        atop_cocaine_28day_total ~ "continuous",
+                        atop_cocaine_clean_gram ~ "continuous"
+                        #atop_psilocybin_mushrooms_clean_grams ~ "continuous",
+                        #atop_dmt_clean_mg ~ "continuous",
+                        #atop_ghb_28day_total ~ "continuous",
+                        #atop_ghb__clean_ml ~ "continuous",
+                        #atop_thc_oil_28day_total ~ "continuous"
+                        ),
+            label = list(atop_alc_used ~ "Used alcohol",
+                         atop_alc_28day_total ~ "Total days of alcohol use",
+                         atop_alc_qty_clean_std ~ "Alcohol amount on typical day (std drinks)",
+                         atop_cannabis_used ~ "Used cannabis",
+                         atop_cann_28day_total ~ "Total days of cannabis use",
+                         atop_cann_qty_clean_gram ~ "Cannabis amount on typical day (g)",
+                         atop_amph_used ~ "Used amphetamine type substances",
+                         atop_amph_28day_total ~ "Total days of amphetamine use",
+                         atop_amph_qty_clean_mg ~ "Amphetamine amount on typical day (mg)",
+                         atop_benzo_used ~ "Used benzodiazepine",
+                         atop_benzo_28day_total ~ "Total days of benzodiazepine use",
+                         atop_benzo_clean_mg ~ "Benzodiazepine amount on typical day (mg)",
+                         atop_heroin_used ~ "Used heroin",
+                         atop_heroin_28day_total ~ "Total days of heroin use",
+                         atop_heroin_clean_gram ~ "Heroin amount on typical day (g)",
+                         atop_opioid_used ~ "Used illicit opioid",
+                         atop_opioid_28day_total ~ "Total days illicit opioid use",
+                         atop_opioid_clean_mg ~ "Illicit opioid use on typical day (mg)",
+                         atop_cocaine_used ~ "Used cocaine",
+                         atop_cocaine_28day_total ~ "Total days cocaine use",
+                         atop_cocaine_clean_gram ~ "Cocaine use on typical day (g)",
+                         atop_tobacco_used ~ "Used tobacco",
+                         atop_tobacco_28day_total ~ "Total days tobacco use",
+                         atop_tobacco_clean_cigs ~ "Tobacco use on typical day (cigs)",
+                         atop_ecig_used ~ "Used e-cigarettes",
+                         atop_ecig_28day_total ~ "Total days of e-cigarette use",
+                         atop_other_used ~ "Used other drugs",
+                         atop_inject ~ "Injected drugs",
+                         atop_inject_28day_total ~ "Total days injecting drugs",
+                         atop_inject_used_equip ~ "Injected with equipment used by someone else"),
+            digits=list(atop_amph_used ~ 0,
+                        atop_benzo_used ~ 0,
+                        atop_heroin_used ~ 0,
+                        atop_opioid_used ~ 0,
+                        atop_cocaine_used ~ 0,
+                        atop_tobacco_used ~ 0,
+                        atop_ecig_used ~ 0,
+                        atop_other_used ~ 0,
+                        atop_amph_qty_clean_mg ~ 2,
+                        atop_benzo_clean_mg ~ 2,
+                        atop_heroin_clean_gram ~ 2,
+                        atop_opioid_clean_mg ~ 2,
+                        atop_cocaine_clean_gram ~ 2,
+                        atop_tobacco_clean_cigs ~ 2,
+                        atop_tobacco_28day_total ~ 2),
+            statistic = c(all_continuous() ~ "{mean} ({sd})")) %>%
+  modify_header(all_stat_cols() ~ "**{level}**"))
+
+```
+
+ATOP non drug outcomes
+```{r}
+
+harmony %>%
+    tbl_strata(strata=redcap_event_name, ~.x %>%
+    tbl_summary(by = "treatment", missing = "no",
+            include = c("atop_work","atop_work_28day_total",
+                        "atop_study","atop_study_28day_total",
+                        "atop_homeless","atop_eviction","atop_caregiver",
+                        "atop_arrested","atop_violence","atop_violent_to_you",
+                        "atop_psych_health","atop_phys_health","atop_qol"),
+            statistic = c(all_continuous() ~ "{mean} ({sd})"),
+            type = list(atop_work_28day_total ~ "continuous",
+                        atop_study_28day_total ~ "continuous"),
+            label = list(atop_work ~ "Did paid work",
+                         atop_work_28day_total ~ "Days worked in last 28 days",
+                         atop_study ~ "Did study",
+                         atop_study_28day_total ~ "Days studying in last 28 days",
+                         atop_homeless ~ "Was homeless",
+                         atop_eviction ~ "Was at risk of eviction",
+                         atop_caregiver ~ "Was a primary caregiver or living with any child/children",
+                         atop_arrested ~ "Was arrested",
+                         atop_violence ~ "Was violent towards someone",
+                         atop_violent_to_you ~ "Experienced violence towards them",
+                         atop_psych_health ~ "Psychological health rating",
+                         atop_phys_health ~ "Physical health rating",
+                         atop_qol ~ "Overall quality of life rating")) %>%
+  modify_header(all_stat_cols() ~ "**{level}**"))
+
+```
+
+
+Identify what variables are co-use cannabis and tobacco
+atop outcomes table has some
+```{r}
+harmony %>%
+  filter(redcap_event_name %in% c("screening_consent_arm_1","week_12_arm_1","week_24_arm_1","week_8")) %>%
+    tbl_strata(strata=redcap_event_name, ~.x %>%
+    tbl_summary(by = "treatment", missing = "no",
+            include = c("cannabis_quit","cannabis_smoking","cannabis_quitlength","cannabismix",
+                        "cannabis_wotob","liketostopcannabis","liketostoptobacco",
+                        "cannabis_tobacco_quit","cannabis_tob_quitboth"),
+            statistic = c(all_continuous() ~ "{mean} ({sd})"),
+            label = list(cannabis_quit ~ "How often have you attempted to quit cannabis",
+                         cannabis_smoking ~ "When you stopped using cannabis what happened
+                         to you cigarette smoking",
+                         cannabis_quitlength ~ "In last year, what is the longest time you
+                         were able to stop using cannabis",
+                         cannabismix ~ "How do you usually use cannabis",
+                         cannabis_wotob ~ "How often do you smoke cannabis without tobacco",
+                         liketostopcannabis ~ "How much would you like to stop smoking cannabis",
+                         liketostoptobacco ~ "How much would you like to stop smoking tobacco",
+                         cannabis_tobacco_quit ~ "Would you consider stopping both together",
+                         cannabis_tob_quitboth ~ "Do you think you might have more success using 
+                         a treatment designed to help stop both substances together")) %>%
+  modify_header(all_stat_cols() ~ "**{level}**"))
+```
+

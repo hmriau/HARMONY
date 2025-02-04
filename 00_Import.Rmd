@@ -1,0 +1,297 @@
+---
+title: "00_Import"
+output: html_document
+date: "2024-05-02"
+---
+
+```{r, setup}
+pacman::p_load(here,tidyverse,readxl)
+```
+
+Read in the original datasets
+```{r,include=FALSE}
+harmony_baseline <- read_excel(here("Data","Original","Harmony Baseline Data CLEANED.xlsx")) %>%
+  rename(FN = atsi)
+harmony_wk4 <- read_excel(here("Data","Original","Harmony Wk4 Data Clean.xlsx"))
+harmony_wk8 <- read_excel(here("Data","Original","Harmony Wk 8 Data Clean.xlsx"))
+harmony_wk12 <- read_excel(here("Data","Original","Harmony Wk12 Data_Clean.xlsx"))
+harmony_wk24 <- read_excel(here("Data","Original","wk 24 data clean.xlsx"))
+harmony_rand <- read_excel(here("Data","Original","Randomisation1.xlsx"),range = "A1:F503") %>%
+  dplyr::select(record_id,treatment)
+harmony_age <- read.csv(here("Data","Original","LIVEHARMONY_DATA_2024-05-14_1251.csv"))
+harmony_co <- read.csv(here("Data","Original","Harmony CO Verification.csv"),na.strings=c("","NA"))
+harmony_ae <- read_excel(here("Data","Original","LIVEHARMONY_DATA_AE.xlsx"))
+```
+
+
+Keep only needed variables - co verification
+```{r}
+harmony_co2 <- harmony_co %>% dplyr::select(record_id,redcap_event_name,co_ppm) %>%
+  mutate(co_ppm = case_when(co_ppm == "yes" ~ NA,
+                            co_ppm == "3 ppm" ~ "3",
+                            co_ppm == "20 ppm CO" ~ "20",
+                            co_ppm == "2 ppm CO" ~ "2",
+                            !is.na(co_ppm) ~ co_ppm),
+         smoke = ifelse(as.numeric(co_ppm)>8,1,ifelse(!is.na(co_ppm),0,NA))) %>%
+    filter(!is.na(co_ppm))
+
+saveRDS(harmony_co2,here("Data","harmony_co.RDS"))
+```
+
+Keep only needed variables - age
+```{r}
+harmony_age2 <- harmony_age %>% 
+  dplyr::select(record_id,age)
+```
+
+Keep only needed variables - adverse events
+```{r}
+harmony_ae2 <- harmony_ae %>%
+  filter(redcap_repeat_instrument=="adverse_events_repeating") %>%
+  dplyr::select(record_id,aenumber,aetype,aestatus,aesymptom,aesymptom_other,aeseverity,aecausality)
+
+saveRDS(harmony_ae2,here("Data","harmony_ae0.RDS"))
+```
+
+
+Keep only needed variables - baseline
+```{r,include=FALSE}
+harmony_baseline <- harmony_baseline[,colSums(is.na(harmony_baseline))<nrow(harmony_baseline)]
+
+harmony_baseline2 <- harmony_baseline %>%
+  dplyr::select(record_id,redcap_event_name,redcap_data_access_group,
+                baselinedate, smokingstatus, hsi_category,
+                tob_cigprerolled, tob_rollyourown, tob_chopchop, tob_other,
+                quitlength, quitattempt_howlongago,methods_ownwillpower,
+                methods_briefadvice,methods_counselling,methods_gum,methods_lozenges,
+                methods_patches,methods_mouthspray,methods_inhalator,methods_strips,
+                methods_champix,methods_zyban,methods_quitline,methods_smartphone,
+                methods_websites,methods_clinic,methods_resources,methods_supportgroup,
+                methods_ecig,methods_other,quitintention,motivation_current,
+                quitdifficulty_current,selfefficacy_current,selfefficacy_nonsmoker,
+                nrtuseful,wdl_mean_item_score,
+                cravings,strengthofcravings,tobaccospend,ecigfamiliarity,eliquidcontent,
+                oat_meds,oat_meds_bupe,oat_meds_other,oat_route,oat_dose,oat_datestart,
+                oat_years,oat_months,oat_weeks,oat_days,atop_alc_used,
+                atop_alc_28day_total,atop_alc_qty_clean_std,atop_cannabis_used,
+                atop_cann_28day_total,atop_cann_qty_clean_gram,cannabis_quit,
+                cannabis_smoking,cannabis_quitlength,cannabismix,cannabis_wotob,
+                liketostopcannabis,liketostoptobacco,cannabis_tobacco_quit,
+                cannabis_tob_quitboth,atop_amph_used,atop_amph_28day_total,
+                atop_amph_qty_clean_mg,atop_benzo_used,atop_benzo_28day_total,
+                atop_benzo_clean_mg,atop_heroin_used,atop_heroin_28day_total,
+                atop_heroin_clean_gram,atop_opioid_used,atop_opioid_28day_total,
+                atop_opioid_clean_mg,atop_cocaine_used,atop_cocaine_28day_total,
+                atop_cocaine_clean_gram,atop_tobacco_used,atop_tobacco_28day_total,
+                atop_tobacco_clean_cigs,atop_ecig_used,atop_ecig_28day_total,
+                atop_other_used,atop_psilocybin_mushrooms_28day_total,
+                atop_psilocybin_mushrooms_clean_grams,atop_dmt_28day_total,
+                atop_dmt_clean_mg,atop_ghb_28day_total,atop_ghb__clean_ml,
+                atop_thc_oil_28day_total,atop_thc_oil_clean_ml,atop_inject,
+                atop_inject_28day_total,atop_inject_used_equip,atop_work,
+                atop_work_28day_total,atop_study,atop_study_28day_total,
+                atop_homeless,atop_eviction,atop_caregiver,atop_arrested,
+                atop_violence,atop_violent_to_you,atop_psych_health,atop_phys_health,
+                atop_qol,phq_score,phq_category,gender,gender_other,FN,
+                education,household_members,dependents,incomesource_paid,
+                incomesource_benefit,incomesource_family,incomesource_savings,
+                incomesource_other,hsi2) %>%
+  rename(hsi2_day = hsi2)
+```
+
+Keep only needed variables - week 4
+```{r,include=FALSE}
+harmony_wk4 <- harmony_wk4[,colSums(is.na(harmony_wk4))<nrow(harmony_wk4)]
+
+harmony_wk42 <- harmony_wk4 %>%
+  dplyr::select(record_id,redcap_event_name,redcap_data_access_group,w4_date,
+                w4_smokingstatus,w4_hsi_category,w4_smoketqd,w4_quit,w4_durationpuff,
+                w4_quitattempts,w4_quitlength,w4_quitanyother,w4_quitanyother_2,
+                w4_nicotineany___0,w4_nicotineany___1,w4_nicotineany___2,
+                w4_nicotineany___3,w4_nicotineany___4,w4_nicotineany_other,
+                w4_nicotineany_oral___0,w4_nicotineany_oral___1,w4_nicotineany_oral___2,
+                w4_nicotineany_oral___3,w4_oralfreq,w4_patchfreq,w4_vpnfreq,
+                w4_atop_alc_used,w4_atop_alc_28day_total,w4_atop_alc_qty_clean,
+                w4_atop_cannabis_used,w4_atop_cann_28day_total,w4_atop_cann_qty_clean,
+                w4_atop_amph_used,w4_atop_amph_28day_total,w4_atop_amph_qty_clean,
+                w4_atop_benzo_used,w4_atop_benzo_28day_total,w4_atop_benzo_qty_clean,
+                w4_atop_heroin_used,w4_atop_heroin_28day_total,w4_atop_heroin_qty_clean,
+                w4_atop_opioid_used,w4_atop_opioid_28day_total,w4_atop_opioid_qty_clean,
+                w4_atop_cocaine_used,w4_atop_cocaine_28day_total,w4_atop_cocaine_qty_clean,
+                w4_atop_tobacco_used,w4_atop_tobacco_28day_total,w4_atop_tobacco_qty_clean,
+                w4_atop_ecig_used,w4_atop_ecig_28day_total,wk4_add_eliquid___1,
+                wk4_add_eliquid___2,wk4_add_eliquid___3,wk4_add_eliquid___4,
+                wk4_add_eliquid___5,w4_atop_inject,w4_atop_inject_28day_total,
+                w4_atop_inject_used_equip,w4_atop_work,w4_atop_work_28day_total,
+                w4_atop_study,w4_atop_study_28day_total,w4_atop_homeless,
+                w4_atop_eviction,w4_atop_caregiver,w4_atop_arrested,w4_atop_violence,
+                w4_atop_violent_to_you,w4_atop_psych_health,w4_atop_phys_health,
+                w4_atop_qol,w4_pptprobs,wk4_symptoms_side_effects,
+                week_4_interview_complete,w4_hsi2_day,w4_hsi2_week,w4_hsi2_month)
+
+names(harmony_wk42) <- sub('^w4_', '', names(harmony_wk42))
+names(harmony_wk42) <- sub('^wk4_', '', names(harmony_wk42))
+names(harmony_wk42) <- sub('^week_4_', '', names(harmony_wk42))
+```
+
+Keep only needed variables - week 8
+```{r,include=FALSE}
+harmony_wk8 <- harmony_wk8[,colSums(is.na(harmony_wk8))<nrow(harmony_wk8)]
+
+harmony_wk82 <- harmony_wk8 %>%
+  dplyr::select(record_id,w8_smokingstatus,wk8_hsi_category,w8_smokelast4,
+                w8_quit,w8_durationpuff,w8_quitattempts,w8_quitlength,
+                w8_quitanyother,w8_quitanyother_2,w8_nicotineany___0,
+                w8_nicotineany___1,w8_nicotineany___2,w8_nicotineany___3,
+                w8_nicotineany___4,w8_nicotineany_other,w8_nicotineany_oral___0,
+                w8_nicotineany_oral___1,
+                w8_nicotineany_oral___2,w8_nicotineany_oral___3,w8_patchfreq,
+                w8_oralfreq,w8_vpnfreq,w8_atop_alc_used,w8_atop_alc_28day_total,
+                w8_atop_alc_qty_clean,w8_atop_cannabis_used,w8_atop_cann_28day_total,
+                w8_atop_cann_qty_clean,w8_cannabismix,w8_cannabis_change,
+                w8_atop_amph_used,w8_atop_amph_28day_total,w8_atop_amph_qty_clean,
+                w8_atop_benzo_used,w8_atop_benzo_28day_total,w8_atop_benzo_qty_clean,
+                w8_atop_heroin_used,w8_atop_heroin_28day_total,w8_atop_heroin_qty_clean,
+                w8_atop_opioid_used,w8_atop_opioid_28day_total,w8_atop_opioid_qty_clean,
+                w8_atop_cocaine_used,w8_atop_cocaine_28day_total,w8_atop_cocaine_qty_clean,
+                w8_atop_tobacco_used,w8_atop_tobacco_28day_total,w8_atop_tobacco_qty_clean,
+                w8_atop_ecig_used,w8_atop_ecig_28day_total,wk8_add_eliquid___1,
+                wk8_add_eliquid___2,wk8_add_eliquid___3,wk8_add_eliquid___4,
+                wk8_add_eliquid___5,w8_atop_inject,w8_atop_inject_28day_total,
+                w8_atop_inject_used_equip,w8_atop_work,w8_atop_work_28day_total,
+                w8_atop_study,w8_atop_study_28day_total,w8_atop_homeless,
+                w8_atop_eviction,w8_atop_caregiver,w8_atop_arrested,w8_atop_violence,
+                w8_atop_violent_to_you,w8_atop_psych_health,w8_atop_phys_health,
+                w8_atop_qol,w8_pptprobs,wk8_symptoms_side_effects,
+                week_8_interview_complete,w8_hsi2_day,w8_hsi2_week,w8_hsi2_month) %>%
+  mutate(redcap_event_name = "week_8")
+
+names(harmony_wk82) <- sub('^w8_', '', names(harmony_wk82))
+names(harmony_wk82) <- sub('^wk8_', '', names(harmony_wk82))
+names(harmony_wk82) <- sub('^week_8_', '', names(harmony_wk82))
+
+```
+
+Keep only needed variables - week 12
+```{r,include=FALSE}
+harmony_wk12 <- harmony_wk12[,colSums(is.na(harmony_wk12))<nrow(harmony_wk12)]
+
+
+harmony_wk122 <- harmony_wk12 %>%
+  dplyr::select(record_id,redcap_event_name,redcap_data_access_group,
+                w12_checkindate,w12_ae,w12_conmed,w12_catiremind,
+                w12_pptprobs,wk12_add_eliquid___1,wk12_add_eliquid___2,
+                wk12_add_eliquid___3,wk12_add_eliquid___4,wk12_add_eliquid___5,
+                script_ongoing,week_12_checkin_complete,
+                w12_date,w12_smokingstatus,hsi_category,w12_quit,w12_smokelast4,
+                w12_durationpuff,w12_durationrelapse,w12_7dayppa,w12_quitattempts,
+                w12_quitlength,w12_quitanyother,w12_quitanyother_2,
+                w12_quitintention,w12_motivation_current,w12_motivation_nonsmoker,
+                w12_quitdifficulty_current,w12_quitdifficulty_nonsmoker,
+                w12_selfefficacy_current,w12_selfefficacy_nonsmoker,
+                w12_wdl_angry,w12_wdl_nervous,w12_wdl_depressed,w12_wdl_conc,
+                w12_wdl_hungry,w12_wdl_sleep,w12_wdl_restless,w12_wdl_impatient,
+                w12_cravings,w12_strengthofcravings,w12_tobaccospend,w12_patchany,
+                w12_patchfreq,w12_patchlt,w12_patch_duration,w12_patch_stop,
+                w12_patch_never,w12_patch_redcravings,w12_patch_easy,w12_patch_safe,
+                w12_patch_sideeff,w12_oralnrt_any,w12_oralnrt_freq,w12_oralnrt_howoften,
+                w12_oralnrt_duration,w12_oralnrt_stop,w12_gum_freq,w12_lozenge_freq,
+                w12_inhalator_current,w12_spray_freq,w12_gum_current,w12_lozenge_current,
+                w12_inhalator_current,w12_spray_current,w12_oralnrt_lt,
+                w12_oralnrt_redcravings,w12_oralnrt_easy,w12_oralnrt_enjoyable,
+                w12_oralnrt_safe,w12_oralnrt_sideeff,w12_oralnrt_never,w12_vape_any,
+                w12_vape_freq,w12_vape_lt_2,w12_vape_duration,w12_vape_freq_prev,
+                w12_vape_start,w12_vape_add,w12_vape_add_yes___0,w12_vape_add_yes___1,
+                w12_vape_redcravings,w12_vape_easy,w12_vape_enjoyable,w12_vape_safe,
+                w12_vape_sideeff,w12_vape_never,
+                w12_atop_alc_used,w12_atop_alc_28day_total,w12_atop_alc_clean_std,
+                w12_atop_cannabis_used,w12_atop_cann_28day_total,
+                w12_atop_cann_qty_clean_gram,w12_cannabismix,w12_cannabis_change,
+                w12_atop_amph_used,w12_atop_amph_28day_total,w12_atop_amph_qty_clean_gram,
+                w12_atop_benzo_used,w12_atop_benzo_28day_total,w12_atop_benzo_qty_clean_mg,
+                w12_atop_heroin_used,w12_atop_heroin_28day_total,w12_atop_heroin_qty_clean_gram,
+                w12_atop_opioid_used,w12_atop_opioid_28day_total,w12_atop_opioid_qty_clean_mg,
+                w12_atop_cocaine_used,w12_atop_cocaine_28day_total,w12_atop_cocaine_qty_clean_gram,
+                w12_atop_tobacco_used,w12_atop_tobacco_28day_total,w12_atop_tobacco_qty_clean_cigs,
+                w12_atop_ecig_used,w12_atop_ecig_28day_total,w12_atop_ketamine_used,
+                w12_atop_ketamine_28day_total,w12_atop_katamine_clean_gram,
+                w12_atop_ghb_used,w12_atop_ghb_28day_total,w12_atop_ghb_clean_ml,
+                w12_atop_dmt_used,w12_atop_dmt_28day_total,w12_atop_dmt_clean_gram,
+                w12_atop_lsd_used,w12_atop_lsd_28day_total,w12_atop_lsd_clean_mg,
+                w12_atop_inject,w12_atop_inject_28day_total,w12_atop_inject_used_equip,
+                w12_atop_work,w12_atop_work_28day_total,w12_atop_study,w12_atop_study_28day_total,
+                w12_atop_homeless,w12_atop_eviction,w12_atop_caregiver,w12_atop_arrested,
+                w12_atop_violence,w12_atop_violent_to_you,w12_atop_psych_health,
+                w12_atop_phys_health,w12_atop_qol,preference,w12_hsi2_day,w12_hsi2_week,w12_hsi2_month) %>%
+    mutate(w12_quitanyother_2 = as.character(w12_quitanyother_2))
+
+
+names(harmony_wk122) <- sub('^w12_', '', names(harmony_wk122))
+names(harmony_wk122) <- sub('^wk12_', '', names(harmony_wk122))
+names(harmony_wk122) <- sub('^week_12_', '', names(harmony_wk122))
+
+```
+
+Keep only needed variables - week 24
+```{r,include=FALSE}
+harmony_wk24 <- harmony_wk24[,colSums(is.na(harmony_wk24))<nrow(harmony_wk24)]
+
+harmony_wk242 <- harmony_wk24 %>%
+  dplyr::select(record_id,redcap_event_name,redcap_data_access_group,
+                w24_date,w24_smokingstatus,hsi_scored,w24_quit,w24_smokelast4,
+                w24_durationpuff,w24_durationrelapse,w24_7dayppa,w24_30dayconta,
+                w24_30daynumber,w24_quitattempts,w24_quitlength,w24_quitanyother,
+                w24_quitanyother_2,w24_quitintention,w24_motivation_current,
+                w24_motivation_nonsmoker,w24_quitdifficulty_current,
+                w24_quitdifficulty_nonsmoker,w24_selfefficacy_current,
+                w24_selfefficacy_nonsmoker,w24_wdl_angry,w24_wdl_nervous,
+                w24_wdl_depressed,w24_wdl_conc,w24_wdl_hungry,w24_wdl_sleep,
+                w24_wdl_restless,w24_wdl_impatient,w24_cravings,w24_strengthofcravings,
+                w24_patchany,w24_patchfreq,w24_patchlt,w24_patch_duration,w24_patch_stopwhen,
+                w24_patch_stop,w24_patch_redcravings,w24_patch_easy,w24_patch_safe,
+                w24_patch_sideeff,w24_patch_never,w24_oralnrt_any,w24_oralnrt_freq,
+                w24_gum_current,w24_lozenge_current,w24_inhalator_current,w24_spray_current,
+                w24_oralnrt_lt,w24_oralnrt_howoften,w24_gum_freq,w24_lozenge_freq,
+                w24_inhalator_freq,w24_spray_freq,w24_oralnrt_duration,w24_oralnrt_stopwhen,
+                w24_oralnrt_stop,w24_oralnrt_redcravings,w24_oralnrt_easy,
+                w24_oralnrt_enjoyable,w24_oralnrt_safe,w24_oralnrt_sideeff,
+                w24_oralnrt_never,w24_vape_any,w24_vape_freq,w24_vape_lt_2,
+                w24_vape_duration,w24_vape_freq_prev,w24_vape_stopwhen,w24_vape_start,
+                w24_vape_add,w24_vape_add_yes___0,w24_vape_add_yes___1,
+                w24_vape_redcravings,w24_vape_easy,w24_vape_enjoyable,w24_vape_safe,
+                w24_vape_sideeff,w24_vape_never,w24_oat_meds,w24_oat_dose,
+                w24_oat_meds_bupe,w24_oat_route,w24_oat_datestart,
+                w24_oat_months,w24_oat_weeks,w24_atop_alc_used,w24_atop_alc_28day_total,
+                w24_atop_alc_qty_clean,w24_atop_cannabis_used,w24_atop_cann_28day_total,
+                w24_atop_cann_qty_clean,w24_cannabismix,w24_cannabis_change,
+                w24_atop_amph_used,w24_atop_amph_28day_total,w24_atop_amph_qty_clean,
+                w24_atop_benzo_used,w24_atop_benzo_28day_total,w24_atop_benzo_qty_clean,
+                w24_atop_heroin_used,w24_atop_heroin_28day_total,w24_atop_heroin_qty_clean,
+                w24_atop_opioid_used,w24_atop_opioid_28day_total,w24_atop_opioid_qty_clean,
+                w24_atop_cocaine_used,w24_atop_cocaine_28day_total,w24_atop_cocaine_qty_clean,
+                w24_atop_tobacco_used,w24_atop_tobacco_28day_total,w24_atop_tobacco_qty_clean,
+                w24_atop_ecig_used,w24_atop_ecig_28day_total,w24_atop_inject,
+                w24_atop_inject_28day_total,w24_atop_inject_used_equip,w24_atop_work,
+                w24_atop_work_28day_total,w24_atop_study,w24_atop_study_28day_total,
+                w24_atop_homeless,w24_atop_eviction,w24_atop_caregiver,w24_atop_arrested,
+                w24_atop_violence,w24_atop_violent_to_you,w24_atop_psych_health,
+                w24_atop_phys_health,w24_atop_qol,week_24_interview_cati_complete,
+                w24_hsi2_day,w24_hsi2_week,w24_hsi2_month) %>%
+  mutate(w24_quitanyother_2 = as.character(w24_quitanyother_2))
+
+names(harmony_wk242) <- sub('^w24_', '', names(harmony_wk242))
+names(harmony_wk242) <- sub('^wk24_', '', names(harmony_wk242))
+names(harmony_wk242) <- sub('^week_24_', '', names(harmony_wk242))
+
+
+```
+
+
+```{r,include=FALSE}
+harmony_alltimes <- bind_rows(harmony_baseline2,harmony_wk42,harmony_wk82,harmony_wk122,harmony_wk242) %>%
+  merge(harmony_rand, by="record_id") %>%
+  left_join(harmony_age2, by="record_id") %>%
+  left_join(harmony_co2, by=c("record_id","redcap_event_name"))
+
+saveRDS(harmony_alltimes,here("Data","harmony_alltimes.RDS"))
+```

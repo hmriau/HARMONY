@@ -1,0 +1,321 @@
+---
+title: "Data Management"
+output: html_document
+date: "2024-05-06"
+---
+
+```{r setup, include=FALSE}
+pacman::p_load(here,tidyverse,gtsummary)
+harmony_alltimes <- readRDS(here("Data","harmony_alltimes.RDS"))
+harmony_co <- readRDS(here("Data","harmony_co.RDS"))
+```
+
+
+# Data prep
+
+week 24 duration puff
+30dayconta if w24_durationpuff = 1 or 2
+branching from smoking status = 3
+if smoking status = 1 2 or 0, then they didnt have 30 day continuous abstinence
+
+vape_add - tabulate
+easy_to_use - tabulate
+w12_vape_easy
+w12_vape_enjoyable
+w12_vape_safe
+w12_vape_sideeff
+(at any/all time points)
+do the same for oral + patch
+put in table of interpretation of bayes factors
+```{r}
+#change the refuse/missing to NA
+harmony_alltimes <- harmony_alltimes %>%
+  mutate(across(where(is.character),~if_else(. %in% c("99","999","98","88","888"),NA,.)),
+         across(where(is.numeric),~if_else(. %in% c(99,999,98,88,888),NA,.)))
+
+#change the 1=yes 2=no to 0=no
+varschange <- c("atop_alc_used","atop_cannabis_used","atop_amph_used","atop_benzo_used",
+                "atop_heroin_used","atop_opioid_used","atop_cocaine_used",
+                "atop_tobacco_used","atop_ecig_used","atop_inject","atop_inject_used_equip",
+                "atop_work","atop_study","atop_homeless","atop_eviction",
+                "atop_caregiver","atop_arrested","atop_violence","atop_violent_to_you",
+                "symptoms_side_effects","30dayconta","quitattempts")
+wdl <- c("wdl_angry","wdl_nervous","wdl_depressed","wdl_conc","wdl_hungry",
+                             "wdl_sleep","wdl_restless","wdl_impatient")
+harmony_alltimes[wdl] <- lapply(harmony_alltimes[wdl],as.numeric) #make wdl numeric
+harmony_alltimes <- harmony_alltimes %>% mutate(across(varschange,~if_else(.  == "2",0,.))) %>%
+  #get rid of $ for numeric
+  mutate(tobaccospend2 = as.numeric(case_when(tobaccospend == "100-200" ~ "150", 
+                                             tobaccospend == "$100" ~ "100",
+                                             tobaccospend == "$15" ~ "15",
+                                             tobaccospend == "$150" ~ "150",
+                                             tobaccospend == "$30" ~ "30",
+                                             tobaccospend == "$4" ~ "4",
+                                             tobaccospend == "$80" ~ "80",
+                                             tobaccospend == "$90" ~ "90")),
+         tobaccospend = as.numeric(ifelse(!is.na(tobaccospend2),tobaccospend2,tobaccospend)),
+         atop_cocaine_28day_total = as.numeric(atop_cocaine_28day_total),
+         atop_cocaine_clean_gram = as.numeric(atop_cocaine_clean_gram),
+         atop_psilocybin_mushrooms_clean_grams = as.numeric(atop_psilocybin_mushrooms_clean_grams),
+         atop_ghb_28day_total = as.numeric(atop_ghb_28day_total),
+         atop_ghb__clean_ml = as.numeric(atop_ghb__clean_ml),
+         atop_thc_oil_28day_total = as.numeric(atop_thc_oil_28day_total),
+         dependents = as.numeric(dependents),
+         #change upper / lower case
+         hsi_category2 = case_when(hsi_category == "High Addiction" ~ "High addiction",
+                                  hsi_category == "Low Addiction" ~ "Low addiction",
+                                  hsi_category == "Moderate Addiction" ~ "Moderate addiction"),
+         hsi_category = ifelse(!is.na(hsi_category2),hsi_category2,hsi_category),
+         hsi_category = factor(hsi_category,levels=c("High addiction","Moderate addiction","Low addiction"))) %>%
+  #get mean wdl
+  rowwise() %>% mutate(wdl_mean_item_score = mean(c_across(wdl),na.rm=TRUE)) %>%
+  ungroup() %>%
+  mutate(education = factor(education,levels=c(0,1,2,3,4,5,6),
+                            labels=c("Left school before finishing year 10",
+                                     "Completed year 10 (School certificate or equivalent)",
+                                     "Completed year 12 (HSC or equivalent)",
+                                     "Completed a Certificate III, Certificate IV, or Diploma",
+                                     "Completed an undergraduate university degree",
+                                     "Completed a post graduate degree",
+                                     "Other")),
+         gender = case_when(gender == 0 ~ "Male",
+                            gender == 1 ~ "Female",
+                            gender == 2 ~ "Other"),
+         datagrp = case_when(redcap_data_access_group == "hunter_new_england" ~ "Hunter New England",
+                             redcap_data_access_group == "south_east_sydney" ~ "South East Sydney",
+                             redcap_data_access_group == "south_western_sydn" ~ "South Western Sydney",
+                             redcap_data_access_group == "st_vincents_lhn" ~ "St Vincents",
+                             redcap_data_access_group == "sydney_lhd" ~ "Sydney",
+                             redcap_data_access_group == "western_sydney_lhd" ~ "Western Sydney"),
+         FN = factor(FN,levels=c(0,1,2,3),
+                     labels=c("Neither","Aboriginal","Torres Strait Islander",
+                              "Aboriginal and Torres Strait Islander")),
+         incomesource_paid = case_when(incomesource_paid == 0 ~ "Main source",
+                                       incomesource_paid == 1 ~ "Minor source",
+                                       incomesource_paid == 2 ~ "No income from this source"),
+         incomesource_benefit = case_when(incomesource_benefit == 0 ~ "Main source",
+                                       incomesource_benefit == 1 ~ "Minor source",
+                                       incomesource_benefit == 2 ~ "No income from this source"),
+         incomesource_family = case_when(incomesource_family == 0 ~ "Main source",
+                                       incomesource_family == 1 ~ "Minor source",
+                                       incomesource_family == 2 ~ "No income from this source"),
+         incomesource_savings = case_when(incomesource_savings == 0 ~ "Main source",
+                                       incomesource_savings == 1 ~ "Minor source",
+                                       incomesource_savings == 2 ~ "No income from this source"),
+         incomesource_other = case_when(incomesource_other == 0 ~ "Main source",
+                                       incomesource_other == 1 ~ "Minor source",
+                                       incomesource_other == 2 ~ "No income from this source"),
+         treatment = case_when(treatment == 0 ~ "VNP",
+                               treatment == 1 ~ "NRT"),
+         phq_category = factor(phq_category,levels=c("Normal","Mild","Moderate","Severe")),
+         #get all oat times together
+         oat_years = ifelse(oat_years == 2019, 5, oat_years),
+         oat_years = case_when(is.na(oat_years) & !is.na(oat_months) ~ oat_months/12,
+                               !is.na(oat_years) ~ oat_years,
+                               is.na(oat_years) & !is.na(oat_weeks) ~ oat_weeks/56,
+                               is.na(oat_years) & !is.na(oat_days) ~ oat_days/365),
+         #oat types
+         oat_meds = case_when(oat_meds == 0 ~ "Methadone",
+                              oat_meds == 1 ~ "Buprenorphine",
+                              oat_meds == 2 ~ "Suboxone",
+                              oat_meds == 3 ~ "MS Mono",
+                              oat_meds == 4 ~ "Subutex"),
+         oat_meds_bupe = case_when(oat_meds_bupe == 0 ~ "Buvidal",
+                                   oat_meds_bupe == 1 ~ "Sublocade",
+                                   oat_meds_bupe == 2 ~ "Suboxone"),
+         oat_route = case_when(oat_route == 1 ~ "Subcutaneous",
+                               oat_route == 2 ~ "Sublingual"),
+         #smoking stats
+         quitlength = factor(quitlength, levels=c(0,1,2,3,4,5,6),
+                             labels=c("Haven't tried to stop smoking in last year",
+                                      "Less than 24 hours",
+                                      "1-6 days",
+                                      "1-2 weeks",
+                                      "3-4 weeks",
+                                      "1-3 months",
+                                      "More than 3 months")),
+         quitattempt_howlongago = factor(quitattempt_howlongago,levels=c(0,1,2,3),
+                                         labels=c("0-3 months back","4-6 months back",
+                                                  "7-9 months back","10-12 months back")),
+         #quitting intention
+         quitintention = factor(quitintention,levels=c(0,1,2,3,4),
+                                labels=c("I will probably return to smoking","I am not sure what I will do",
+                                         "I think I should stop but dont really want to","I want to stop and hope to stay smoke free",
+                                         "I want to reduce or cut down on my smoking but not stop")),
+         motivation_current = factor(motivation_current,levels=c(0,1,2,3),
+                                       labels=c("Not very motivated","Moderately motivated","Very motivated","Extremely motivated")),
+         motivation_nonsmoker = factor(motivation_nonsmoker,levels=c(0,1,2,3),
+                                       labels=c("Not very motivated","Moderately motivated","Very motivated","Extremely motivated")),
+         quitdifficulty_current = factor(quitdifficulty_current,levels=c(0,1,2,3,4),
+                                         labels=c("Impossible","Very hard","Hard","Easy","Very easy")),
+         quitdifficulty_nonsmoker = factor(quitdifficulty_nonsmoker,levels=c(0,1,2,3,4),
+                                           labels=c("Impossible","Very hard","Hard","Easy","Very easy")),
+         selfefficacy_current = factor(selfefficacy_current,levels=c(0,1,2,3,4),
+                                       labels=c("Not at all confident","Slightly confident",
+                                                "Moderately confident","Very confident","Extremely confident")),
+         selfefficacy_nonsmoker = factor(selfefficacy_nonsmoker,levels=c(0,1,2,3,4),
+                                       labels=c("Not at all confident","Slightly confident",
+                                                "Moderately confident","Very confident","Extremely confident")),
+         nrtuseful = factor(nrtuseful,levels=c(0,1,2),
+                            labels=c("A lot easier","A bit easier","No difference")),
+         vape_any = factor(vape_any,levels=c(0,1,2),
+                           labels=c("Yes, currently using","Yes, used in the past but no longer using now",
+                                    "No, not used at all")),
+         vape_freq = factor(vape_freq,levels=c(0,1,2),
+                            labels=c("Daily","Some days of the week","Less than weekly")),
+         vape_lt_2 = factor(vape_lt_2,levels=c(0,1,2),
+                            labels=c("No, I plan to stop in the next month",
+                                     "I have no immediate plants to stop, but will when I can",
+                                     "I plan to continue using for as long as I need them")),
+         vape_duration = factor(vape_duration,levels=c(0,1,2,3,4,5),
+                                labels=c("Less than a week","1-2 weeks","3-6 weeks",
+                                         "7-10 weeks","11-12 weeks","More than 12 weeks")),
+         vape_freq_prev = factor(vape_freq_prev,levels=c(0,1,2),
+                                 labels=c("Daily","Some days of the week","Less than weekly")),
+         #vape_stop = factor(vape_stop,levels=c(0,1,2,3,4,5,6,7,8,9,10),
+        #                    labels=c("Cost","Experienced adverse reaction","They were difficult to use",
+         #                            "They were embarassing to use","To quit nicotine completely",
+        #                             "I had concerns about their safety","I forgot to use them",
+         #                            "Went back to smoking normal cigarettes",
+        #                             "Found too hard to buy supplies",
+         #                            "No specific reason","Other")),
+         vape_start = factor(vape_start,levels=c(0,1,2,3),
+                             labels=c("A day or more before quitting smoking regularly",
+                                      "A day or more after quitting smoking regularly",
+                                      "I quit smoking and started vaping on the same day",
+                                      "I vaped and continued smoking")),
+         vape_add = ifelse(redcap_event_name == "week_24_arm_1" & vape_add == 2,0,vape_add),
+         vape_add = factor(vape_add,levels=c(0,1),labels=c("No","Yes")),
+         vape_redcravings = factor(vape_redcravings,levels=c(0,1,2,3),
+                                   labels=c("Very","Somewhat","Not very","Not at all")),
+         vape_easy = factor(vape_easy,levels=c(0,1,2,3),
+                                   labels=c("Very","Somewhat","Not very","Not at all")),
+         vape_enjoyable = factor(vape_enjoyable,levels=c(0,1,2,3),
+                                   labels=c("Very","Somewhat","Not very","Not at all")),
+         vape_safe = factor(vape_safe,levels=c(0,1,2,3),
+                                   labels=c("Very","Somewhat","Not very","Not at all")),
+         vape_sideeff = factor(vape_sideeff,levels=c(0,1,2,3),
+                                   labels=c("Very","Somewhat","Not very","Not at all")),
+         vape_never = factor(vape_never,levels=c(0,1,2,3,4,5,6,7,8,9,10,11,12),
+                             labels=c("Never heard about them","Cost","I have concerns about their safety",
+                                      "I don't like their look","I want to quit all nicotine",
+                                      "I just haven't got around to it",
+                                      "They are too complicated to use",
+                                      "Have tried them in the past, didn't like them",
+                                      "Others have told me they are rubbish",
+                                      "Lost the ones you gave me or gave them away",
+                                      "I felt I could quit without the VNP",
+                                      "No specific reason",
+                                      "Other")),
+        cannabis_quit = factor(cannabis_quit,levels=c(0,1,2),
+                               labels=c("Never","1-5 times","More than 5 times")),
+        cannabis_smoking = factor(cannabis_smoking,levels=c(0,1,2),
+                                  labels=c("Smoking increased","Smoking stayed the same",
+                                           "Smoking decreased")),
+        cannabis_quitlength = factor(cannabis_quitlength,levels=c(0,1,2,3,4,5,6),
+                                     labels=c("I haven't tried to stop in last year",
+                                              "Less than 24 hours",
+                                              "1-6 days",
+                                              "1-2 weeks",
+                                              "3-4 weeks",
+                                              "1-3 months",
+                                              "More than 3 months")),
+        cannabismix = factor(cannabismix,levels=c(0,1,2,3,4),
+                             labels=c("Smoke it with tobacco",
+                                      "Smoke it without tobacco",
+                                      "Vape it",
+                                      "Eat it",
+                                      "Other")),
+        cannabis_wotob = factor(cannabis_wotob,levels=c(0,1,2),
+                                labels=c("Never","Occasionally","Regularly")),
+        cannabis_tob_quitboth = factor(cannabis_tob_quitboth,levels=c(0,1,2,3,4),
+                                       labels=c("Definitely yes",
+                                                "Probably yes",
+                                                "Unsure",
+                                                "Probably no",
+                                                "Definitely no")),
+        co_ppm = as.numeric(co_ppm),
+        co_abstinent = ifelse(co_ppm <= 8, 1, ifelse(co_ppm > 8, 0, NA)),
+        complete_abs = ifelse(atop_tobacco_used == 0 & atop_ecig_used == 0 & vape_any == "No, not used at all" & oralnrt_any == 2 & patchany == 2,1,0)) %>%
+  dplyr::select(-tobaccospend2,-hsi_category2) %>%
+  #CURRENTLY removing values that cannot be correct
+  mutate(atop_tobacco_clean_cigs = ifelse(atop_tobacco_clean_cigs > 1000,NA,atop_tobacco_clean_cigs),
+         abstinent = case_when(redcap_event_name %in% c("week_12_arm_1","week_24_arm_1") & 
+                              !is.na(smokingstatus) & `7dayppa` == 2 ~ 1,
+                            redcap_event_name %in% c("week_12_arm_1","week_24_arm_1") & 
+                              !is.na(smokingstatus) & (`7dayppa` == 1 | is.na(`7dayppa`)) ~ 0),
+         #abstinence30 = ifelse(`30dayconta` == 1,0,ifelse(`30dayconta`==0,1,NA)))
+         abstinence30 = case_when(smokingstatus %in% c(0,1,2) ~ 0,
+                          durationpuff == 0 ~ 0,
+                          durationpuff == 1 & `30dayconta` == 0 ~ 1,
+                          durationpuff == 1 & `30dayconta` == 1 ~ 0,
+                          durationpuff == 1 & is.na(`30dayconta`) ~ 0,
+                          `30dayconta` == 0 ~ 1,
+                          `30dayconta` == 1 ~ 0),
+         #cigarettes a day
+         hsi2_day = case_when(.default=hsi2_day,
+                              smokingstatus == 3 ~ 0,
+                              !is.na(hsi2_week) ~ hsi2_week / 7,
+                              !is.na(hsi2_month) ~ hsi2_month / 28))
+
+
+```
+
+New abstinence variable based off what their CO response was
+```{r}
+#harmony_co <- harmony_co %>% dplyr::select(-co_ppm)
+#harmony_alltimes <- harmony_alltimes %>% left_join(harmony_co,by=c("record_id","redcap_event_name"))
+```
+
+
+```{r}
+saveRDS(harmony_alltimes,here("Data","harmony.RDS"))
+```
+
+#Harmony ae
+
+```{r}
+harmony_ae <- readRDS(here("Data","harmony_ae0.RDS"))
+harmony_trt <- harmony_alltimes %>% dplyr::select(record_id,treatment) %>%
+  group_by(record_id) %>%
+  filter(row_number()==1)
+harmony_ae2 <- harmony_ae %>% left_join(harmony_trt,by="record_id") %>%
+  filter(aestatus==0)
+
+#add in some other symptom groups instead of "other"
+harmony_ae3 <- harmony_ae2 %>%
+  mutate(aesymptom = case_when(aesymptom == 1 ~ "Cough",
+                            aesymptom == 2 ~ "Dry mouth",
+                            aesymptom == 3 ~ "Throat irritation",
+                            aesymptom == 4 ~ "Indigestion",
+                            aesymptom == 5 ~ "Gas",
+                            aesymptom == 6 ~ "Diarrhoea",
+                            aesymptom == 7 ~ "Shortness of breath",
+                            aesymptom == 8 ~ "Irregular heart beat",
+                            aesymptom == 9 ~ "Hiccups",
+                            aesymptom == 10 ~ "Dizziness",
+                            aesymptom == 11 ~ "Taste disturbance",
+                            aesymptom == 12 ~ "Dyseguia (loss of taste)",
+                            aesymptom == 13 ~ "Abdominal discomfort",
+                            aesymptom == 14 ~ "Headache",
+                            aesymptom == 15 ~ "Nausea",
+                            aesymptom == 16 ~ "Vomiting",
+                            aesymptom == 17 ~ "Phlegm",
+                            aesymptom == 18 ~ "Mouth ulcer",
+                            aesymptom == 99 ~ "Other"),
+         aesymptom = case_when(aesymptom == "Other" & grepl("COVID|covid",aesymptom_other) ~ "COVID-19",
+                               aesymptom == "Other" & grepl("Nightmare|vivid|nightmare|dream|Vivid",aesymptom_other) ~ "Nightmares / vivid dreams",
+                               aesymptom == "Other" & grepl("device|Device|Nicotine oil leak",aesymptom_other) ~ "Device event",
+                               aesymptom == "Other" & grepl("burn|Burn",aesymptom_other) ~ "Burn",
+                               aesymptom != "Other" ~ aesymptom,
+                               .default = as.character(aesymptom)),
+         aeseverity = case_when(aeseverity == 1 ~ "Mild",
+                                aeseverity == 2 ~ "Moderate",
+                                aeseverity == 3 ~ "Severe"),
+         aecausality = case_when(aecausality == 1 ~ "Yes",
+                                 aecausality == 0 ~ "No"),
+         severe_causal = ifelse(aeseverity == "Severe" & aecausality == "Yes","Yes","No"))
+saveRDS(harmony_ae3,here("Data","harmony_ae.RDS"))
+```
+
+

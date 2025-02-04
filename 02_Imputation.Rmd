@@ -1,0 +1,147 @@
+---
+title: "Imputation"
+output: html_document
+date: "2024-02-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(tidyverse,here,brms,mice,Hmisc,multilevel)
+harmony <- readRDS(here("Data","harmony.RDS"))
+
+```
+
+
+```{r}
+
+imputedat <- harmony %>% dplyr::select(redcap_event_name,record_id,redcap_data_access_group,
+                                       atop_cannabis_used,age,
+                                       treatment,smokingstatus,abstinent,
+                                       abstinence30,hsi_category,cravings,strengthofcravings,
+                                       wdl_mean_item_score,quitattempts,quitlength,
+                                       gender,FN,education,tob_cigprerolled,phq_category,
+                                       atop_psych_health,atop_phys_health,atop_qol,
+                                       atop_alc_used,atop_cannabis_used,
+                                       oralnrt_any,vape_any,
+                                       hsi2_day)
+
+imputedat_t <- imputedat %>% mutate(time = case_when(redcap_event_name == "screening_consent_arm_1" ~ "baseline",
+                                      redcap_event_name == "week_4_arm_1" ~ "w4",
+                                      redcap_event_name == "week_8" ~ "w8",
+                                      redcap_event_name == "week_12_arm_1" ~ "w12",
+                                      redcap_event_name == "week_24_arm_1" ~ "w24")) %>%
+  dplyr::select(-redcap_event_name,-redcap_data_access_group) %>%
+  pivot_wider(names_from = time,values_from = c(atop_cannabis_used,smokingstatus,abstinent,
+                                       abstinence30,hsi_category,cravings,strengthofcravings,
+                                       wdl_mean_item_score,quitattempts,quitlength,
+                                       gender,FN,age,education,tob_cigprerolled,phq_category,
+                                       atop_psych_health,atop_phys_health,atop_qol,
+                                       atop_alc_used,atop_cannabis_used,
+                                       oralnrt_any,vape_any,hsi2_day))
+imputedat_t <- imputedat_t[,colSums(is.na(imputedat_t))<nrow(imputedat_t)]
+
+groups <- harmony %>% dplyr::select(record_id,redcap_data_access_group) %>%
+  filter(!is.na(redcap_data_access_group)) %>%
+  group_by(record_id) %>%
+  filter(row_number()==1)
+
+imputedat_t <- merge(imputedat_t,groups,by="record_id") %>%
+  dplyr::select(-smokingstatus_baseline,-age_w4,-age_w8,-age_w12,-age_w24)
+
+
+```
+
+#take imputedat_t for the MNAR analysis
+
+```{r}
+mnar_dat <- imputedat_t %>%
+  dplyr::select(record_id,treatment,redcap_data_access_group,atop_cannabis_used_baseline,abstinent_w12,abstinent_w24)
+
+#if all missing is not abstinent
+notab_mnar_dat <- mnar_dat %>%
+  mutate(abstinent_w12 = ifelse(!is.na(abstinent_w12),abstinent_w12,0),
+         abstinent_w24 = ifelse(!is.na(abstinent_w24),abstinent_w24,0),
+         atop_cannabis_used_baseline = ifelse(record_id == "255-96",0,atop_cannabis_used_baseline)) %>%
+  pivot_longer(cols=c(abstinent_w12,abstinent_w24),names_to = "time",values_to = "abstinent") %>%
+  mutate(time = ifelse(time=="abstinent_w12","week12","week24"))
+saveRDS(notab_mnar_dat,here("Data","notab_mnar_dat.RDS"))
+
+#if all missing is abstinent
+ab_mnar_dat <- mnar_dat %>%
+  mutate(abstinent_w12 = ifelse(!is.na(abstinent_w12),abstinent_w12,1),
+         abstinent_w24 = ifelse(!is.na(abstinent_w24),abstinent_w24,1),
+         atop_cannabis_used_baseline = ifelse(record_id == "255-96",0,atop_cannabis_used_baseline)) %>%
+  pivot_longer(cols=c(abstinent_w12,abstinent_w24),names_to = "time",values_to = "abstinent") %>%
+  mutate(time = ifelse(time=="abstinent_w12","week12","week24"))
+saveRDS(ab_mnar_dat,here("Data","ab_mnar_dat.RDS"))
+
+```
+
+
+```{r}
+#check missingness patterns of variables to be used in model
+#if too many variables to use 1 matrix then split up by primary and secondary
+#otherwise just look at pattern of whole thing
+
+#missingness pattern
+md.pattern(imputedat_t[which(names(imputedat_t) %in% c("treatment","cravings_w12","cravings_w24","cravings_baseline"))])
+pbox(imputedat_t,)
+```
+
+```{r}
+#what is the ICC of the different levels?
+ICC1(aov(abstinent_w12 ~ as.factor(redcap_data_access_group), data = imputedat_t)) #0.02
+ICC1(aov(cravings_w12 ~ as.factor(redcap_data_access_group), data = imputedat_t)) #0.01
+
+```
+
+
+```{r}
+#impute the missing data
+#predictive mean matching and 20 burn-ins
+#number of imputed datasets = 20 or % missing primary outcome responses, whichever higher
+#17.6% of the primary outcome is missing
+
+#site, cannabis use, trt groups, variables predictive of primary outcome, variables predictive of drop-out
+
+#secondary outcomes
+#2. abstinence30
+#3. abstinence at week 24
+#4. adverse events
+#5. hsi_category
+#6. cravings & strengthofcravings
+#6.2 wdl_mean_item_score
+#7. quitattempts & quitlength
+#8. oralnrt_any & vape_any
+#9. atop_psych_health,atop_phys_health,atop_qol,atop_alc_used,atop_cannabis_used
+
+#md.pattern(imputedat_t)
+imp <- mice(imputedat_t, m = 20, print = FALSE,method="pmm",maxit=50,seed=930320491,
+            pred=quickpred(imputedat_t,include=c("treatment","redcap_data_access_group","atop_cannabis_used"),
+                           exclude=c("hsi2_day_baseline","hsi2_day_w4","hsi2_day_w8","hsi2_day_w12","hsi2_day_w24"), #this was done well after report sent so not included as predictor
+                           minpuc = 0.2,mincor=0.4,method="spearman"))
+events <- imp$loggedEvents
+
+saveRDS(imp,here("Data","imp.RDS"))
+```
+
+```{r}
+#trace plots of the imputed data
+plot(imp, hsi2_day_w4 + hsi2_day_w8 + hsi2_day_w12 + hsi2_day_w24 ~ .it | .ms, layout = c(2, 1))
+```
+
+```{r}
+#plot the densities of observed and imputed data
+densityplot(imp,~hsi2_day_w24)
+densityplot(imp,~oralnrt_any_w24)
+densityplot(imp,~vape_any_w12)
+densityplot(imp,~vape_any_w24)
+densityplot(imp,~abstinence30_w24)
+```
+
+```{r}
+#dont need to correct any imputed scores that arent following the scoring mechanism (e.g. above max possible value) - they all
+#fit within the  bounds
+test <- complete(imp,action="long")
+```
+

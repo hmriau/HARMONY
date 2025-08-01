@@ -11,7 +11,7 @@ EACH MODEL IS SAVED SO JUST READ IT IN UNLESS IT NEEDS TO BE RERUN
 
 Each fit is pp_check'ed but only does the first imputation
 ```{r setup, include=FALSE}
-pacman::p_load(here,tidyverse,gtsummary,brms,mice,emmeans,marginaleffects)
+pacman::p_load(here,tidyverse,gtsummary,brms,mice,emmeans,marginaleffects,epitools)
 
 #read in the raw and imputed data
 harmony <- readRDS(here("Data","harmony.RDS"))
@@ -193,6 +193,20 @@ harmony %>%
               include = c("symptoms_side_effects"),
               label = c(symptoms_side_effects ~ "New health concerns, symptoms or side effects")) %>%
     modify_header(all_stat_cols() ~ "**{level}**"))
+
+
+#calculate the IRR of AEs and SAEs
+# Calculate IRR and confidence interval
+saes <- rateratio(matrix(c(4,8,241,259),2,2))
+aes <- rateratio(matrix(c(64,84,241,259),2,2))
+#sae IRR = 1.83 (95%CI 0.56, 7.08)
+#ae IRR = 1.22 (95%CI 0.88, 1.70)
+
+#(8/259) / (4/241) for IRR = 1.86
+#sae / N in group
+#(84/259) / (64/241) for IRR = 1.22
+#ae / N in group
+
 ```
 
 
@@ -731,15 +745,22 @@ quit_tab <- merge(raw_quit,quit_res,by="time") %>% merge(quith,by="time")
 adhere_dat <- complete(imp,action="long")
 adhere_dat <- adhere_dat %>%
   dplyr::select(record_id,oralnrt_any_w12,oralnrt_any_w24,vape_any_w12,vape_any_w24,
+                patchany_w12,patchany_w24,
                 redcap_data_access_group,atop_cannabis_used_baseline,treatment,.imp)
 
 #pivot longer the dataset
 nrt <- adhere_dat %>% 
-  dplyr::select(record_id,oralnrt_any_w12,oralnrt_any_w24,.imp) %>%
-  pivot_longer(cols = c(oralnrt_any_w12,oralnrt_any_w24),
-               names_to = "time", values_to = "oralnrt_any") %>%
-  mutate(time = factor(case_when(time == "oralnrt_any_w12" ~ "week12",
-                          time == "oralnrt_any_w24" ~ "week24"))) 
+  dplyr::select(record_id,oralnrt_any_w12,oralnrt_any_w24,patchany_w12,patchany_w24,.imp) %>%
+  mutate(adherencenrt_w12 = case_when(oralnrt_any_w12 == 0 | patchany_w12 == 0 ~ 1,
+                                   oralnrt_any_w12 %in% c(1,2) & patchany_w12 %in% c(1,2) ~ 0),
+         adherencenrt_w24 = case_when(oralnrt_any_w24 == 0 | patchany_w24 == 0 ~ 1,
+                                   oralnrt_any_w24 %in% c(1,2) & patchany_w24 %in% c(1,2) ~ 0)) %>%
+  pivot_longer(cols = c(adherencenrt_w12,adherencenrt_w24),
+               names_to = "time", values_to = "adherencenrt") %>%
+  mutate(time = factor(case_when(time == "adherencenrt_w12" ~ "week12",
+                          time == "adherencenrt_w24" ~ "week24"))) %>%
+  dplyr::select(-oralnrt_any_w12,-oralnrt_any_w24,-patchany_w12,-patchany_w24)
+
 vnp <- adhere_dat %>% 
   dplyr::select(record_id,vape_any_w12,vape_any_w24,.imp) %>%
   pivot_longer(cols = c(vape_any_w12,vape_any_w24),
@@ -754,9 +775,9 @@ adhere_dat <- adhere_dat %>% merge(nrt,by=c(".imp","record_id")) %>%
   mutate(redcap_data_access_group = factor(redcap_data_access_group),
          treatment = factor(treatment),
          record_id = factor(record_id),
-         adherence = case_when(oralnrt_any == 0 & treatment == "NRT" ~ 1,
+         adherence = case_when(adherencenrt == 1 & treatment == "NRT" ~ 1,
                                vape_any == "Yes, currently using" & treatment == "VNP" ~ 1,
-                               oralnrt_any != 0 & !is.na(oralnrt_any) & treatment == "NRT" ~ 0,
+                               adherencenrt == 0 & treatment == "NRT" ~ 0,
                                vape_any != "Yes, currently using" & !is.na(vape_any) & treatment == "VNP" ~ 0))
 
 adhere_dat <- split(x=adhere_dat,f=adhere_dat$.imp)
@@ -770,6 +791,8 @@ adherefit <- brm_multiple(adherence ~ 0 + Intercept + treatment*time +
                         control = list(adapt_delta = 0.99,max_treedepth=11),
                         prior = c(prior(normal(0,1000),class=b),
                                   prior(student_t(3, 0, 3.75), lb=0,class=sd)))
+
+
 #saveRDS(adherefit,here("Data","adherefit.RDS"))
 adherefit <- readRDS(here("Data","adherefit.RDS"))
 
@@ -796,9 +819,9 @@ adhereh <- hypothesis(adherefit,c("treatmentVNP > 0","treatmentVNP + treatmentVN
 raw_adhere <- harmony %>% 
   filter(redcap_event_name %in% c("week_12_arm_1","week_24_arm_1")) %>% 
   group_by(redcap_event_name,treatment) %>% 
-  mutate(adherence = case_when(oralnrt_any == 0 & treatment == "NRT" ~ 1,
+  mutate(adherence = case_when(oralnrt_any == 0 | patchany == 0 & treatment == "NRT" ~ 1,
                                vape_any == "Yes, currently using" & treatment == "VNP" ~ 1,
-                               oralnrt_any != 0 & !is.na(oralnrt_any) & treatment == "NRT" ~ 0,
+                               oralnrt_any != 0 & !is.na(oralnrt_any) & patchany != 0 & !is.na(patchany) & treatment == "NRT" ~ 0,
                                vape_any != "Yes, currently using" & !is.na(vape_any) & treatment == "VNP" ~ 0)) %>%
   summarise(prop_ab = paste0(sum(adherence==1,na.rm=TRUE),"/",sum(!is.na(adherence)),
                              " (",round(mean(adherence==1,na.rm=TRUE)*100,0),"%)")) %>%
@@ -820,8 +843,6 @@ kable(adhere_tab[,c(1,3,2,4,5,7,6)],
 
 # 9. Substance use, health and wellbeing
 ```{r}
-#Determine what part of the ATOP is being analysed
-#maybe cannabis, alcohol and QOL
 
 impdat1 <- complete(imp,action="long")
 atopdat <- impdat1 %>% 

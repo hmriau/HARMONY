@@ -22,7 +22,7 @@ imputedat <- harmony %>% dplyr::select(redcap_event_name,record_id,redcap_data_a
                                        gender,FN,education,tob_cigprerolled,phq_category,
                                        atop_psych_health,atop_phys_health,atop_qol,
                                        atop_alc_used,atop_cannabis_used,
-                                       oralnrt_any,vape_any,
+                                       oralnrt_any,vape_any,patchany,#add patchany 31JUL25
                                        hsi2_day)
 
 imputedat_t <- imputedat %>% mutate(time = case_when(redcap_event_name == "screening_consent_arm_1" ~ "baseline",
@@ -37,7 +37,7 @@ imputedat_t <- imputedat %>% mutate(time = case_when(redcap_event_name == "scree
                                        gender,FN,age,education,tob_cigprerolled,phq_category,
                                        atop_psych_health,atop_phys_health,atop_qol,
                                        atop_alc_used,atop_cannabis_used,
-                                       oralnrt_any,vape_any,hsi2_day))
+                                       oralnrt_any,vape_any,patchany,hsi2_day))
 imputedat_t <- imputedat_t[,colSums(is.na(imputedat_t))<nrow(imputedat_t)]
 
 groups <- harmony %>% dplyr::select(record_id,redcap_data_access_group) %>%
@@ -112,13 +112,13 @@ ICC1(aov(cravings_w12 ~ as.factor(redcap_data_access_group), data = imputedat_t)
 #6. cravings & strengthofcravings
 #6.2 wdl_mean_item_score
 #7. quitattempts & quitlength
-#8. oralnrt_any & vape_any
+#8. oralnrt_any & vape_any #31JUL25 also patchany
 #9. atop_psych_health,atop_phys_health,atop_qol,atop_alc_used,atop_cannabis_used
 
 #md.pattern(imputedat_t)
 imp <- mice(imputedat_t, m = 20, print = FALSE,method="pmm",maxit=50,seed=930320491,
             pred=quickpred(imputedat_t,include=c("treatment","redcap_data_access_group","atop_cannabis_used"),
-                           exclude=c("hsi2_day_baseline","hsi2_day_w4","hsi2_day_w8","hsi2_day_w12","hsi2_day_w24"), #this was done well after report sent so not included as predictor
+                           exclude=c("hsi2_day_baseline","hsi2_day_w4","hsi2_day_w8","hsi2_day_w12","hsi2_day_w24","patchany"), #this was done well after report sent so not included as predictor
                            minpuc = 0.2,mincor=0.4,method="spearman"))
 events <- imp$loggedEvents
 
@@ -127,7 +127,7 @@ saveRDS(imp,here("Data","imp.RDS"))
 
 ```{r}
 #trace plots of the imputed data
-plot(imp, hsi2_day_w4 + hsi2_day_w8 + hsi2_day_w12 + hsi2_day_w24 ~ .it | .ms, layout = c(2, 1))
+plot(imp, patchany_w12 + patchany_w24 ~ .it | .ms, layout = c(2, 1))
 ```
 
 ```{r}

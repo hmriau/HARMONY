@@ -14,7 +14,7 @@ imp <- readRDS(here("Data","imp.RDS"))
 ```
 
 # 19 participants who were cluster randomised
-remove then to show that the results are similar
+remove them to show that the results are similar
 ```{r}
 
 primdat <- readRDS(here("Data","primdat.RDS"))
@@ -439,7 +439,6 @@ saveRDS(pp_tab,here("Output","pp_tab.RDS"))
 ```
 
 Checking the prior information - gives accurate result when inverse logit the output.
-Need to determine if the prior for control should include only those who were abstinent at baseline. Currently only defines the intercept (b[1]) so its also kind of giving a prior for non-cannabis users?
 ```{r}
 
 pp_code__prior <- "

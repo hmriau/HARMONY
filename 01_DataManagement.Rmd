@@ -13,20 +13,7 @@ harmony_co <- readRDS(here("Data","harmony_co.RDS"))
 
 # Data prep
 
-week 24 duration puff
-30dayconta if w24_durationpuff = 1 or 2
-branching from smoking status = 3
-if smoking status = 1 2 or 0, then they didnt have 30 day continuous abstinence
 
-vape_add - tabulate
-easy_to_use - tabulate
-w12_vape_easy
-w12_vape_enjoyable
-w12_vape_safe
-w12_vape_sideeff
-(at any/all time points)
-do the same for oral + patch
-put in table of interpretation of bayes factors
 ```{r}
 #change the refuse/missing to NA
 harmony_alltimes <- harmony_alltimes %>%

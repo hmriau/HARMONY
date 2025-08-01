@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "Descriptives"
 output: html_document
 date: "2024-05-06"
 ---
@@ -12,7 +12,6 @@ harmony <- readRDS(here("Data","harmony.RDS"))
 
 ```{r}
 #Demographics
-#age currently missing
 table1 <- harmony %>% filter(redcap_event_name == "screening_consent_arm_1") %>%
   tbl_summary(by="treatment",missing="no",
               type = list(dependents ~ "continuous"),
@@ -42,7 +41,7 @@ saveRDS(table1, here("Output","Table1.RDS"))
 ```
 
 
-Need to clean oat dose
+
 ```{r}
 #Current OAT treatment
 harmony %>% filter(redcap_event_name %in% c("screening_consent_arm_1","week_24_arm_1")) %>%
@@ -139,7 +138,6 @@ harmony %>%
 ```
 
 
-add in an option for why vape_never - never given one / dont have one
 ```{r}
 harmony %>% 
   filter(redcap_event_name %in% c("week_12_arm_1","week_24_arm_1")) %>%
@@ -169,7 +167,6 @@ harmony %>%
 ```
 
 ATOP - will hide any outcomes with < 5 responses
-one cigarette value is wrong
 ```{r,echo=FALSE}
 harmony %>%
   tbl_strata(strata=redcap_event_name, ~.x %>%

@@ -10,6 +10,38 @@ harmony <- readRDS(here("Data","harmony.RDS"))
 imp <- readRDS(here("Data","imp.RDS"))
 ```
 
+```{r}
+#who are the participants with non missing outcome data
+#week 12
+harmony_w12 <- harmony %>% filter(redcap_event_name == "week_12_arm_1") %>%
+  filter(!is.na(abstinent)) %>%
+  dplyr::select(record_id,redcap_event_name,redcap_data_access_group) %>%
+  mutate(stats_flag = 1)
+#read in the data I received to compare
+wk12_inclusions <- read.csv(here("Data","Original","LIVEHARMONY-WK12AndDropOut_DATA_2025-07-22_1607.csv")) %>%
+  mutate(redcap_include_flag = 1)
+#join the two
+w12_ids <- full_join(wk12_inclusions,harmony_w12,by=c("record_id","redcap_event_name","redcap_data_access_group"))
+#the 4 people that dont have a stats analysis are participants that didnt exist on the randomisation dataset
+write.csv(w12_ids,here("Data","w12_ids_compare.csv"))
+
+
+harmony_w24 <- harmony %>% filter(redcap_event_name == "week_24_arm_1") %>%
+  filter(!is.na(abstinent)) %>%
+  dplyr::select(record_id,redcap_event_name,redcap_data_access_group) %>%
+  mutate(stats_flag = 1)
+#read in the data I received to compare
+wk24_inclusions <- read.csv(here("Data","Original","LIVEHARMONY-WK24Retention_DATA_2025-07-22_1607.csv")) %>%
+  mutate(redcap_include_flag = 1)
+#join the two
+w24_ids <- full_join(wk24_inclusions,harmony_w24,by=c("record_id","redcap_event_name","redcap_data_access_group"))
+#the 3 people that dont have a stats analysis are participants that didnt exist on the randomisation dataset
+write.csv(w24_ids,here("Data","w24_ids_compare.csv"))
+
+
+```
+
+
 
 Set up the data for analysis
 ```{r}

@@ -175,7 +175,11 @@ names(harmony_wk82) <- sub('^week_8_', '', names(harmony_wk82))
 Keep only needed variables - week 12
 ```{r,include=FALSE}
 harmony_wk12 <- harmony_wk12[,colSums(is.na(harmony_wk12))<nrow(harmony_wk12)]
-
+#save who is included for consort diagram
+w12_id_complete <- harmony_wk12 %>% 
+  #filter(week_12_checkin_complete==2) %>% 
+  dplyr::select(record_id,redcap_event_name,redcap_data_access_group,week_12_checkin_complete)
+write.csv(w12_id_complete,here("Data","w12_id_complete.csv"))
 
 harmony_wk122 <- harmony_wk12 %>%
   dplyr::select(record_id,redcap_event_name,redcap_data_access_group,
@@ -236,6 +240,12 @@ Keep only needed variables - week 24
 ```{r,include=FALSE}
 harmony_wk24 <- harmony_wk24[,colSums(is.na(harmony_wk24))<nrow(harmony_wk24)]
 
+#save who is included for consort diagram
+w24_id_complete <- harmony_wk24 %>% 
+  #filter(week_24_interview_cati_complete==2) %>% 
+  dplyr::select(record_id,redcap_event_name,redcap_data_access_group,week_24_interview_cati_complete)
+write.csv(w24_id_complete,here("Data","w24_id_complete.csv"))
+
 harmony_wk242 <- harmony_wk24 %>%
   dplyr::select(record_id,redcap_event_name,redcap_data_access_group,
                 w24_date,w24_smokingstatus,hsi_scored,w24_quit,w24_smokelast4,
@@ -295,3 +305,31 @@ harmony_alltimes <- bind_rows(harmony_baseline2,harmony_wk42,harmony_wk82,harmon
 
 saveRDS(harmony_alltimes,here("Data","harmony_alltimes.RDS"))
 ```
+
+
+#Compare
+
+Compare the imported datasets with what I received from client for consort diagram
+
+```{r}
+#Week 12
+#read in the data I received to compare
+wk12_inclusions <- read.csv(here("Data","Original","LIVEHARMONY-WK12AndDropOut_DATA_2025-07-22_1607.csv")) %>%
+  mutate(redcap_include_flag = 1)
+#flag the data I received for analysis
+w12_id_complete <- w12_id_complete %>% mutate(import_include_flag = 1)
+#join the two
+w12_ids <- full_join(wk12_inclusions,w12_id_complete,by="record_id")
+write.csv(w12_ids,here("Data","w12_ids_compare.csv"))
+
+#Week 24
+#read in the data I received to compare
+wk24_inclusions <- read.csv(here("Data","Original","LIVEHARMONY-WK24Retention_DATA_2025-07-22_1607.csv")) %>%
+  mutate(redcap_include_flag = 1)
+#flag the data I received for analysis
+w24_id_complete <- w24_id_complete %>% mutate(import_include_flag = 1)
+#join the two
+w24_ids <- full_join(wk24_inclusions,w24_id_complete,by="record_id")
+write.csv(w24_ids,here("Data","w24_ids_compare.csv"))
+```
+
